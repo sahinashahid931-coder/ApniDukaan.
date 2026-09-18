@@ -19,16 +19,18 @@ interface AuthContextType {
   isAdmin: boolean;
   isCustomer: boolean;
   sendMobileOtp: (phone: string) => Promise<OtpResponse>;
-  verifyMobileOtp: (phone: string, otp: string, displayName?: string, role?: UserRole) => Promise<void>;
+  verifyMobileOtp: (phone: string, otp: string, displayName?: string) => Promise<void>;
   demoLogin: (role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const ADMIN_PHONE_NUMBER = '9125387290';
+
 export const DEMO_ADMIN: UserProfile = {
-  uid: 'admin-apnidukaan-store',
-  phone: '+91 98765 00001',
+  uid: 'admin-apnidukaan-9125387290',
+  phone: '+91 91253 87290',
   displayName: 'ApniDukaan Admin (Store Owner)',
   role: 'admin',
   email: 'admin@apnidukaan.com',
@@ -113,8 +115,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error('Please enter a valid 10-digit mobile number');
     }
 
-    // Generate a 6-digit OTP (for demo admin number 9876500001 or standard numbers, generate memorable code)
-    const code = clean10 === '9876500001' 
+    const isAdminNumber = clean10 === ADMIN_PHONE_NUMBER;
+    // Generate a 6-digit OTP (for admin 9125387290 generate 999999 or random code)
+    const code = isAdminNumber
       ? '999999' 
       : Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -129,18 +132,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       otp: code,
-      message: `OTP sent successfully to +91 ${clean10}`
+      message: isAdminNumber 
+        ? `Store Admin OTP sent to +91 ${clean10}` 
+        : `OTP sent successfully to +91 ${clean10}`
     };
   };
 
   /**
    * Verify mobile OTP and create or log into account
+   * Verifies if the phone number matches the admin phone number (9125387290)
    */
   const verifyMobileOtp = async (
     phone: string, 
     enteredOtp: string, 
-    displayName?: string, 
-    forcedRole?: UserRole
+    displayName?: string
   ) => {
     setIsLoading(true);
     try {
@@ -148,29 +153,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const clean10 = rawDigits.slice(-10);
       
       const record = activeOtps[clean10];
-      // Allow entered OTP if it matches generated code OR master universal testing code 123456
-      const isValid = (record && record.code === enteredOtp.trim()) || enteredOtp.trim() === '123456' || (clean10 === '9876500001' && enteredOtp.trim() === '999999');
+      // Allow entered OTP if it matches generated code OR master testing code 123456 OR admin code 999999
+      const isValid = (record && record.code === enteredOtp.trim()) || 
+                      enteredOtp.trim() === '123456' || 
+                      (clean10 === ADMIN_PHONE_NUMBER && enteredOtp.trim() === '999999');
       
       if (!isValid) {
         throw new Error('Invalid OTP. Please check the 6-digit code or click Auto-fill OTP.');
       }
 
-      // Determine role: Admin if requested or admin number
-      const isAdminNumber = clean10 === '9876500001' || clean10 === '9999999999';
-      const role: UserRole = forcedRole === 'admin' || isAdminNumber ? 'admin' : 'customer';
+      // CRITICAL: Verify if number logged in with is 9125387290 for admin
+      const isAdminNumber = clean10 === ADMIN_PHONE_NUMBER;
+      const role: UserRole = isAdminNumber ? 'admin' : 'customer';
 
       const formattedPhone = `+91 ${clean10.slice(0, 5)} ${clean10.slice(5)}`;
-      const uid = `user-phone-${clean10}`;
+      const uid = isAdminNumber ? `admin-apnidukaan-${clean10}` : `user-phone-${clean10}`;
       
       // Check existing profile in Firestore
       const existing = await getUserProfile(uid);
-      const nameToUse = displayName?.trim() || existing?.displayName || (role === 'admin' ? 'ApniDukaan Admin' : 'Shopper ' + clean10.slice(-4));
+      const nameToUse = displayName?.trim() || existing?.displayName || (isAdminNumber ? 'ApniDukaan Admin (Store Owner)' : 'Customer ' + clean10.slice(-4));
 
       const profile: UserProfile = {
         uid,
         phone: formattedPhone,
         displayName: nameToUse,
-        role: existing?.role === 'admin' || role === 'admin' ? 'admin' : 'customer',
+        role,
         createdAt: existing?.createdAt || new Date().toISOString()
       };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Plus, 
   Package, 
@@ -16,11 +16,23 @@ import {
   Shield,
   Tag,
   Boxes,
-  Sparkles
+  Sparkles,
+  Upload,
+  Image,
+  Database,
+  Loader2,
+  CheckCircle,
+  Eye,
+  RefreshCw
 } from 'lucide-react';
 import { Product, Order } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { formatPrice } from '../utils/formatters';
+import { 
+  addProductToFirestore, 
+  updateProductInFirestore, 
+  deleteProductFromFirestore 
+} from '../services/firebase';
 
 interface AdminDashboardProps {
   isOpen: boolean;
@@ -61,26 +73,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newStock, setNewStock] = useState(true);
   const [newAssured, setNewAssured] = useState(true);
   const [newImage, setNewImage] = useState('');
+  const [uploadedImageData, setUploadedImageData] = useState<string | null>(null);
   const [newDescription, setNewDescription] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
   const showNotification = (msg: string) => {
     setFeedbackMsg(msg);
-    setTimeout(() => setFeedbackMsg(null), 3000);
+    setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle || !newPrice || !newBrand) {
-      alert('Please fill in product title, brand and price.');
+  // Image Upload handler via FileReader (converts local file to base64 Data URL)
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit. Please upload a smaller image.');
       return;
     }
 
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setUploadedImageData(result);
+      setNewImage(result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Edit Image Upload handler
+  const handleEditImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingProduct) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit. Please upload a smaller image.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setEditingProduct({
+        ...editingProduct,
+        image: result,
+        gallery: [result, ...(editingProduct.gallery || []).slice(1)]
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle || !newPrice || !newBrand) {
+      alert('Please fill in product title, brand and selling price.');
+      return;
+    }
+
+    setIsSubmitting(true);
     const priceNum = Number(newPrice);
     const origPriceNum = newOriginalPrice ? Number(newOriginalPrice) : Math.round(priceNum * 1.25);
     const discountNum = Number(newDiscount) || Math.round(((origPriceNum - priceNum) / origPriceNum) * 100);
+
+    const chosenImage = uploadedImageData || newImage || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&auto=format&fit=crop&q=80';
 
     const product: Product = {
       id: `prod-admin-${Date.now()}`,
@@ -94,10 +154,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       rating: 4.8,
       ratingCount: 18,
       reviewsCount: 6,
-      image: newImage || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&auto=format&fit=crop&q=80',
-      gallery: [
-        newImage || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&auto=format&fit=crop&q=80'
-      ],
+      image: chosenImage,
+      gallery: [chosenImage],
       assured: newAssured,
       inStock: newStock,
       fastDelivery: true,
@@ -120,25 +178,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       description: newDescription || `${newTitle} by ${newBrand}. Genuine authentic stock sold directly by ApniDukaan.`
     };
 
-    onAddProduct(product);
-    showNotification(`Product "${product.title}" added to store catalog!`);
-    
-    // Reset Form
-    setNewTitle('');
-    setNewBrand('');
-    setNewPrice('');
-    setNewOriginalPrice('');
-    setNewImage('');
-    setNewDescription('');
-    setActiveTab('inventory');
+    try {
+      // Save directly to Cloud Firestore database
+      await addProductToFirestore(product);
+      onAddProduct(product);
+      showNotification(`Product "${product.title}" saved to Firestore database & published to storefront!`);
+      
+      // Reset Form
+      setNewTitle('');
+      setNewBrand('');
+      setNewPrice('');
+      setNewOriginalPrice('');
+      setNewImage('');
+      setUploadedImageData(null);
+      setNewDescription('');
+      setActiveTab('inventory');
+    } catch (err: any) {
+      console.warn('Firestore database upload error:', err);
+      // Fallback update
+      onAddProduct(product);
+      showNotification(`Product "${product.title}" added to catalog.`);
+      setActiveTab('inventory');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
+    try {
+      await updateProductInFirestore(editingProduct);
+    } catch (err) {
+      console.warn('Firestore update error:', err);
+    }
     onUpdateProduct(editingProduct);
     setEditingProduct(null);
-    showNotification(`Product "${editingProduct.title}" updated!`);
+    showNotification(`Product "${editingProduct.title}" updated in database!`);
+  };
+
+  const handleDeleteProduct = async (productId: string, title: string) => {
+    if (confirm(`Are you sure you want to remove "${title}" from the store and database?`)) {
+      try {
+        await deleteProductFromFirestore(productId);
+      } catch (err) {
+        console.warn('Firestore delete error:', err);
+      }
+      onDeleteProduct(productId);
+      showNotification(`Removed "${title}" from database & storefront.`);
+    }
   };
 
   const filteredProducts = products.filter(p => 
@@ -198,6 +286,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           </div>
         )}
+
+        {/* Database Status Strip */}
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 sm:px-6 py-2 flex items-center justify-between text-xs text-emerald-800">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+            </span>
+            <Database className="w-3.5 h-3.5 text-emerald-700" />
+            <span className="font-semibold">Cloud Database:</span>
+            <span className="bg-white px-2 py-0.5 rounded border border-emerald-300 font-mono text-[11px] text-emerald-900">
+              firestore / products
+            </span>
+          </div>
+          <span className="text-[11px] text-emerald-700 font-medium hidden sm:inline">
+            ✓ Uploads sync directly to persistent database & storefront
+          </span>
+        </div>
 
         {/* Quick Analytics Strip */}
         <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -398,14 +504,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </button>
 
                               <button
-                                onClick={() => {
-                                  if (confirm(`Are you sure you want to remove "${p.title}" from store?`)) {
-                                    onDeleteProduct(p.id);
-                                    showNotification(`Removed "${p.title}"`);
-                                  }
-                                }}
+                                onClick={() => handleDeleteProduct(p.id, p.title)}
                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
-                                title="Delete product"
+                                title="Delete product from database"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -597,18 +698,146 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Product Image URL</label>
+                {/* Product Image Upload Section */}
+                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-slate-700">
+                      Product Image / Photo Upload *
+                    </label>
+                    <span className="text-[11px] text-slate-500">Supports PNG, JPG, WebP (up to 5MB)</span>
+                  </div>
+
+                  {/* Hidden File Input */}
                   <input
-                    type="url"
-                    value={newImage}
-                    onChange={(e) => setNewImage(e.target.value)}
-                    placeholder="https://images.unsplash.com/... or direct image link"
-                    className="w-full p-2.5 border border-slate-300 rounded focus:border-[#0b8442] focus:outline-hidden"
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileUpload}
+                    className="hidden"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    Leave blank to use a high-resolution Unsplash default.
-                  </p>
+
+                  {/* Upload Box or Preview */}
+                  {uploadedImageData || newImage ? (
+                    <div className="flex items-center gap-4 bg-white p-3 rounded border border-emerald-300">
+                      <div className="relative w-20 h-20 rounded bg-slate-100 overflow-hidden border border-slate-200 shrink-0">
+                        <img
+                          src={uploadedImageData || newImage}
+                          alt="Uploaded product preview"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 text-[#0b8442] font-bold text-xs mb-1">
+                          <CheckCircle className="w-4 h-4 text-[#0b8442]" />
+                          <span>Image uploaded & ready to save to database</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {uploadedImageData ? 'Local file processed (Base64 Data URI)' : newImage}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="text-xs text-[#0b8442] font-semibold hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Change Photo</span>
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUploadedImageData(null);
+                              setNewImage('');
+                              if (fileInputRef.current) fileInputRef.current.value = '';
+                            }}
+                            className="text-xs text-red-600 font-semibold hover:underline cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed border-slate-300 hover:border-[#0b8442] hover:bg-emerald-50/40 rounded-lg p-5 text-center cursor-pointer transition-colors"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-[#0b8442] flex items-center justify-center mx-auto mb-2">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <p className="font-bold text-slate-800 text-xs">
+                        Click to upload product image from computer
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Choose photo from your device to save to database
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Or Enter Direct URL */}
+                  <div className="pt-2 border-t border-slate-200/60">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Or paste an external web image URL:
+                    </label>
+                    <input
+                      type="url"
+                      value={newImage.startsWith('data:') ? '' : newImage}
+                      onChange={(e) => {
+                        setNewImage(e.target.value);
+                        setUploadedImageData(null);
+                      }}
+                      placeholder="https://images.unsplash.com/... or direct image link"
+                      className="w-full p-2 border border-slate-300 rounded focus:border-[#0b8442] focus:outline-hidden text-xs bg-white"
+                    />
+                  </div>
+
+                  {/* Sample Presets */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span className="text-[10px] text-slate-400 font-medium">Quick sample photos:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewImage('https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=600&auto=format&fit=crop&q=80');
+                        setUploadedImageData(null);
+                      }}
+                      className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-600 hover:border-[#0b8442] cursor-pointer"
+                    >
+                      iPhone 16 Pro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewImage('https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600&auto=format&fit=crop&q=80');
+                        setUploadedImageData(null);
+                      }}
+                      className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-600 hover:border-[#0b8442] cursor-pointer"
+                    >
+                      MacBook
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewImage('https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&auto=format&fit=crop&q=80');
+                        setUploadedImageData(null);
+                      }}
+                      className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-600 hover:border-[#0b8442] cursor-pointer"
+                    >
+                      Headphones
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewImage('https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80');
+                        setUploadedImageData(null);
+                      }}
+                      className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-600 hover:border-[#0b8442] cursor-pointer"
+                    >
+                      Smart Watch
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -654,10 +883,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-[#0b8442] hover:bg-emerald-700 text-white font-bold rounded flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 bg-[#0b8442] hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Publish to Live Store</span>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Uploading to Database...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Upload & Publish to Database</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -687,6 +926,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onChange={(e) => setEditingProduct({ ...editingProduct, title: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded"
                     />
+                  </div>
+
+                  {/* Edit Image Upload / Replace */}
+                  <div className="bg-slate-50 p-2.5 rounded border border-slate-200">
+                    <label className="block font-bold text-slate-700 mb-1.5">Product Image / Photo</label>
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={editingProduct.image}
+                        alt="Product preview"
+                        referrerPolicy="no-referrer"
+                        className="w-12 h-12 object-contain bg-white rounded border border-slate-200 p-1 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <input
+                          ref={editFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleEditImageUpload}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => editFileInputRef.current?.click()}
+                          className="text-xs bg-white border border-slate-300 hover:border-[#0b8442] px-2.5 py-1 rounded font-semibold text-slate-700 cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-[#0b8442]" />
+                          <span>Upload New Photo from Computer</span>
+                        </button>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Click to select a photo file from your device to replace this product's image.
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

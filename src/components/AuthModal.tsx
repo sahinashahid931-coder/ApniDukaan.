@@ -4,7 +4,6 @@ import {
   User, 
   ShieldCheck, 
   ArrowRight, 
-  Sparkles, 
   CheckCircle2, 
   AlertCircle,
   Phone,
@@ -14,25 +13,21 @@ import {
   Shield,
   Smartphone
 } from 'lucide-react';
-import { useAuth, DEMO_ADMIN, DEMO_CUSTOMER } from '../context/AuthContext';
-import { UserRole } from '../services/firebase';
+import { useAuth, ADMIN_PHONE_NUMBER } from '../context/AuthContext';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialRole?: UserRole;
   onSuccess?: () => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ 
   isOpen, 
   onClose,
-  initialRole = 'customer',
   onSuccess
 }) => {
-  const { sendMobileOtp, verifyMobileOtp, demoLogin } = useAuth();
+  const { sendMobileOtp, verifyMobileOtp } = useAuth();
   
-  const [selectedRole, setSelectedRole] = useState<UserRole>(initialRole);
   const [step, setStep] = useState<'MOBILE' | 'OTP'>('MOBILE');
   
   const [phone, setPhone] = useState('');
@@ -49,7 +44,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedRole(initialRole);
       setStep('MOBILE');
       setPhone('');
       setOtp('');
@@ -58,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError(null);
       setInfoMessage(null);
     }
-  }, [isOpen, initialRole]);
+  }, [isOpen]);
 
   // Countdown timer for OTP resend
   useEffect(() => {
@@ -84,6 +78,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setPhone(val);
     setError(null);
   };
+
+  const isAdminCandidate = phone.trim() === ADMIN_PHONE_NUMBER;
 
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -139,7 +135,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await verifyMobileOtp(phone, otp.trim(), name, selectedRole);
+      await verifyMobileOtp(phone, otp.trim(), name);
       onSuccess?.();
       onClose();
     } catch (err: any) {
@@ -153,20 +149,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (generatedOtp) {
       setOtp(generatedOtp);
       setError(null);
-    }
-  };
-
-  const handleQuickDemo = async (role: UserRole) => {
-    setLoading(true);
-    setError(null);
-    try {
-      await demoLogin(role);
-      onSuccess?.();
-      onClose();
-    } catch (err: any) {
-      setError(err.message || 'Quick login failed');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -188,60 +170,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <div className="flex items-center gap-2 mb-1">
             <span className="bg-yellow-400 text-[#0b8442] font-black text-xs px-2 py-0.5 rounded shadow-xs uppercase tracking-wide">
-              {selectedRole === 'admin' ? 'Store Administrator' : 'ApniDukaan'}
+              ApniDukaan
             </span>
             <span className="text-xs text-emerald-100 flex items-center gap-1 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-200" /> 100% Secure OTP Login
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-200" /> 100% Secure Mobile Login
             </span>
           </div>
 
           <h2 className="text-xl font-extrabold tracking-tight">
-            {selectedRole === 'admin' 
-              ? 'Admin Portal Login' 
-              : (step === 'MOBILE' ? 'Login or Sign Up' : 'Verify Mobile Number')}
+            {step === 'MOBILE' ? 'Login or Register' : 'Verify Mobile OTP'}
           </h2>
           <p className="text-xs text-emerald-100 mt-1">
-            {selectedRole === 'admin'
-              ? 'Store Admin access to manage entire catalog, pricing & customer orders'
-              : 'Enter your 10-digit mobile number to access your account & orders'}
+            Enter your 10-digit mobile number to verify and access your account.
           </p>
-        </div>
-
-        {/* Role Toggle Strip */}
-        <div className="flex border-b border-slate-200 bg-slate-50">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRole('customer');
-              setStep('MOBILE');
-              setError(null);
-            }}
-            className={`flex-1 py-3 px-4 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              selectedRole === 'customer'
-                ? 'bg-white text-[#0b8442] border-b-2 border-[#0b8442] shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>Shopper / Customer</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRole('admin');
-              setStep('MOBILE');
-              setError(null);
-            }}
-            className={`flex-1 py-3 px-4 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              selectedRole === 'admin'
-                ? 'bg-white text-[#0b8442] border-b-2 border-[#0b8442] shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 text-amber-600" />
-            <span>Store Admin (Owner)</span>
-          </button>
         </div>
 
         {/* Form Body */}
@@ -276,21 +217,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     maxLength={10}
                   />
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1.5">
-                  By continuing, you agree to ApniDukaan's Terms of Use and Privacy Policy.
-                </p>
+                
+                {isAdminCandidate ? (
+                  <div className="mt-2 p-2 bg-amber-50 rounded border border-amber-200 text-[11px] text-amber-900 flex items-center gap-1.5 font-medium">
+                    <Shield className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                    <span>Store Admin phone number ({ADMIN_PHONE_NUMBER}) recognized.</span>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    By continuing, you agree to ApniDukaan's Terms of Use and Privacy Policy.
+                  </p>
+                )}
               </div>
-
-              {selectedRole === 'admin' && (
-                <div className="p-2.5 bg-amber-50 rounded border border-amber-200 text-[11px] text-amber-900">
-                  <p className="font-bold flex items-center gap-1">
-                    <Shield className="w-3.5 h-3.5 text-amber-700" /> Store Owner Privileges
-                  </p>
-                  <p className="mt-0.5 text-amber-800">
-                    Admin has full authority to list, edit, discount, and sell everything on ApniDukaan, as well as process all customer orders.
-                  </p>
-                </div>
-              )}
 
               <button
                 type="submit"
@@ -320,6 +258,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div>
                   <span className="text-slate-500">OTP sent to: </span>
                   <span className="font-bold text-slate-800">+91 {phone}</span>
+                  {phone === ADMIN_PHONE_NUMBER && (
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-800 font-bold rounded text-[10px]">
+                      Store Admin
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -339,7 +282,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="p-3 bg-emerald-50 rounded-md border border-emerald-300 text-xs text-emerald-950">
                   <div className="flex items-center justify-between font-bold mb-1">
                     <span className="flex items-center gap-1.5 text-[#0b8442]">
-                      <Smartphone className="w-3.5 h-3.5" /> SMS Message (Instant Simulation)
+                      <Smartphone className="w-3.5 h-3.5" /> SMS Message (OTP)
                     </span>
                     <button
                       type="button"
@@ -382,13 +325,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {/* Full Name input (for personalization/account creation) */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Your Full Name <span className="font-normal text-slate-400">(Optional / Setup)</span>
+                  Full Name <span className="font-normal text-slate-400">(Optional)</span>
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={selectedRole === 'admin' ? 'e.g. ApniDukaan Admin' : 'e.g. Sahina Shahid'}
+                  placeholder={phone === ADMIN_PHONE_NUMBER ? 'ApniDukaan Admin' : 'e.g. Sahina Shahid'}
                   className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-[#0b8442] focus:outline-hidden"
                 />
               </div>
@@ -431,40 +374,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </form>
           )}
-
-          {/* Quick Demo Login Helpers */}
-          <div className="mt-6 pt-5 border-t border-slate-200">
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center mb-2.5">
-              Instant 1-Click Demo Login
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                id="demo-customer-login-btn"
-                onClick={() => handleQuickDemo('customer')}
-                className="p-2.5 rounded border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-left transition-colors cursor-pointer group"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 group-hover:text-emerald-950">
-                  <User className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Shopper Demo</span>
-                </div>
-                <p className="text-[10px] text-emerald-700 mt-0.5">Sahina (+91 98765 12345)</p>
-              </button>
-
-              <button
-                type="button"
-                id="demo-admin-login-btn"
-                onClick={() => handleQuickDemo('admin')}
-                className="p-2.5 rounded border border-amber-200 bg-amber-50 hover:bg-amber-100 text-left transition-colors cursor-pointer group"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 group-hover:text-amber-950">
-                  <Shield className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Store Admin Demo</span>
-                </div>
-                <p className="text-[10px] text-amber-700 mt-0.5">Sells everything (Full Access)</p>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

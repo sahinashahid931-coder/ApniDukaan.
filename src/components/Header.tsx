@@ -235,22 +235,24 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-white/80 text-[11px]">Coins</span>
             </div>
 
-            {/* Admin Portal Button (If logged in as Admin) */}
-            {isAdmin ? (
-              <button
-                id="header-admin-portal-btn"
-                onClick={onOpenAdminDashboard}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ffe500] hover:bg-yellow-300 text-[#0b8442] font-black rounded text-xs shadow-sm transition-all transform hover:scale-105 cursor-pointer"
-                title="Manage entire store inventory, catalog & orders"
-              >
-                <Shield className="w-4 h-4 text-[#0b8442]" />
-                <span>Admin Portal</span>
-                <span className="bg-[#0b8442] text-white text-[10px] px-1.5 py-0.2 rounded font-bold ml-0.5">
-                  Store Owner
-                </span>
-              </button>
+            {/* Admin Portal Button (Only if logged in as Admin) */}
+            {user ? (
+              isAdmin && (
+                <button
+                  id="header-admin-portal-btn"
+                  onClick={onOpenAdminDashboard}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ffe500] hover:bg-yellow-300 text-[#0b8442] font-black rounded text-xs shadow-sm transition-all transform hover:scale-105 cursor-pointer"
+                  title="Manage entire store inventory, catalog & orders"
+                >
+                  <Shield className="w-4 h-4 text-[#0b8442]" />
+                  <span>Admin Portal</span>
+                  <span className="bg-[#0b8442] text-white text-[10px] px-1.5 py-0.2 rounded font-bold ml-0.5">
+                    Owner
+                  </span>
+                </button>
+              )
             ) : (
-              /* Admin Portal Shortcut (For fast admin switching) */
+              /* When not logged in, Admin Login option can be shown */
               <button
                 id="header-admin-portal-link"
                 onClick={() => onOpenAuth('admin')}
@@ -304,7 +306,7 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
 
                     <div className="py-1">
-                      {isAdmin ? (
+                      {isAdmin && (
                         <button
                           id="menu-open-admin-portal"
                           onClick={() => {
@@ -315,18 +317,6 @@ export const Header: React.FC<HeaderProps> = ({
                         >
                           <Shield className="w-4 h-4 text-[#0b8442]" />
                           <span>Open Admin Portal (Catalog & Orders)</span>
-                        </button>
-                      ) : (
-                        <button
-                          id="menu-admin-login-btn"
-                          onClick={() => {
-                            onOpenAuth('admin');
-                            setShowUserMenu(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-3 text-xs font-semibold transition-colors cursor-pointer"
-                        >
-                          <Shield className="w-4 h-4 text-amber-600" />
-                          <span>Admin Login (Store Owner)</span>
                         </button>
                       )}
 
@@ -375,23 +365,6 @@ export const Header: React.FC<HeaderProps> = ({
                       >
                         <Coins className="w-4 h-4 text-yellow-500" />
                         <span>SuperCoin Rewards</span>
-                      </button>
-                    </div>
-
-                    {/* Quick Demo Switcher within Menu */}
-                    <div className="p-2 bg-slate-50">
-                      <p className="text-[10px] text-slate-400 uppercase font-bold px-2 mb-1">
-                        Quick Demo Switcher
-                      </p>
-                      <button
-                        onClick={() => {
-                          demoLogin(isAdmin ? 'customer' : 'admin');
-                          setShowUserMenu(false);
-                        }}
-                        className="w-full text-left px-2 py-1.5 rounded hover:bg-white text-[11px] font-bold text-slate-700 flex items-center gap-2 transition-colors cursor-pointer border border-slate-200"
-                      >
-                        <ArrowRightLeft className="w-3.5 h-3.5 text-[#0b8442]" />
-                        <span>Switch to {isAdmin ? 'Shopper (Sahina)' : 'Store Admin (Owner)'}</span>
                       </button>
                     </div>
 
@@ -515,13 +488,15 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>Admin Portal (Catalog & Orders)</span>
                   </button>
                 ) : (
-                  <button 
-                    onClick={() => { onOpenAuth('admin'); setShowMobileMenu(false); }}
-                    className="w-full text-left px-3 py-2.5 rounded-md hover:bg-slate-100 flex items-center gap-3 text-sm font-medium"
-                  >
-                    <Shield className="w-4 h-4 text-amber-600" />
-                    <span>Admin Login (Store Owner)</span>
-                  </button>
+                  !user && (
+                    <button 
+                      onClick={() => { onOpenAuth('admin'); setShowMobileMenu(false); }}
+                      className="w-full text-left px-3 py-2.5 rounded-md hover:bg-slate-100 flex items-center gap-3 text-sm font-medium"
+                    >
+                      <Shield className="w-4 h-4 text-amber-600" />
+                      <span>Admin Login (Store Owner)</span>
+                    </button>
+                  )
                 )}
 
                 <button 

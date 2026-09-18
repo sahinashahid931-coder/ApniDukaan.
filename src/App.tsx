@@ -4,7 +4,6 @@ import { PRODUCTS } from './data/products';
 import { Header } from './components/Header';
 import { CategoryBar } from './components/CategoryBar';
 import { HeroBanners } from './components/HeroBanners';
-import { FilterSidebar } from './components/FilterSidebar';
 import { ProductCard } from './components/ProductCard';
 import { DealsShelf } from './components/DealsShelf';
 import { ProductDetailModal } from './components/ProductDetailModal';
@@ -18,21 +17,22 @@ import { AuthModal } from './components/AuthModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Footer } from './components/Footer';
 import { useAuth } from './context/AuthContext';
-import { UserRole } from './services/firebase';
+import { 
+  UserRole, 
+  addProductToFirestore, 
+  updateProductInFirestore, 
+  deleteProductFromFirestore,
+  subscribeToProductsFromFirestore,
+  seedProductsToFirestoreIfEmpty 
+} from './services/firebase';
 import { 
   LayoutGrid, 
   List, 
   Search, 
-  SlidersHorizontal, 
   X, 
-  CheckCircle,
-  Package,
-  ArrowUpDown,
-  Plus,
-  ShieldCheck,
-  Shield,
-  Sparkles,
-  ArrowRightLeft
+  CheckCircle, 
+  Package, 
+  Shield 
 } from 'lucide-react';
 
 const INITIAL_FILTERS: FilterState = {
@@ -49,9 +49,9 @@ const INITIAL_FILTERS: FilterState = {
 };
 
 export default function App() {
-  const { user, isAdmin, isCustomer, demoLogin } = useAuth();
+  const { user, isAdmin, isCustomer } = useAuth();
 
-  // Products with persistent local and live seller catalog updates
+  // Products with persistent local and live seller catalog updates from Firestore
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('apnidukaan_products');
@@ -61,6 +61,17 @@ export default function App() {
     }
   });
 
+  // Seed and subscribe in real-time to Firestore database products collection
+  useEffect(() => {
+    seedProductsToFirestoreIfEmpty(PRODUCTS);
+    const unsubscribe = subscribeToProductsFromFirestore((dbProducts) => {
+      if (dbProducts && dbProducts.length > 0) {
+        setProducts(dbProducts);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('apnidukaan_products', JSON.stringify(products));
@@ -69,18 +80,14 @@ export default function App() {
     }
   }, [products]);
   
-  // Filters state
+  // Filters state (only search & category, all filters removed)
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   
   // View mode (Grid / List)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Mobile filters drawer
-  const [showMobileFilters, setShowMobileFilters] = useState(false);
-
   // Auth & Admin Portal Modals
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalRole, setAuthModalRole] = useState<UserRole>('customer');
   const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
 
   // Cart & Wishlist persistence
@@ -299,19 +306,34 @@ export default function App() {
     setIsOrderSuccessOpen(true);
   };
 
-  // Seller Maintainer Operations
-  const handleAddProduct = (newProd: Product) => {
+  // Seller Maintainer Operations with Firestore Sync
+  const handleAddProduct = async (newProd: Product) => {
     setProducts((prev) => [newProd, ...prev]);
+    try {
+      await addProductToFirestore(newProd);
+    } catch (e) {
+      console.warn('Firestore add product sync warning:', e);
+    }
     showToast(`Product "${newProd.title}" added to store catalog!`);
   };
 
-  const handleUpdateProduct = (updatedProd: Product) => {
+  const handleUpdateProduct = async (updatedProd: Product) => {
     setProducts((prev) => prev.map((p) => (p.id === updatedProd.id ? updatedProd : p)));
+    try {
+      await updateProductInFirestore(updatedProd);
+    } catch (e) {
+      console.warn('Firestore update product sync warning:', e);
+    }
     showToast(`Product "${updatedProd.title}" updated!`);
   };
 
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    try {
+      await deleteProductFromFirestore(productId);
+    } catch (e) {
+      console.warn('Firestore delete product sync warning:', e);
+    }
     showToast('Product removed from store catalog');
   };
 
@@ -336,7 +358,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Filtering & Sorting Logic
+  // Filtering & Sorting Logic - All Facet Filters Removed Per Request
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       // Search query filter
@@ -361,31 +383,6 @@ export default function App() {
 
       // Subcategory filter
       if (filters.subcategory && product.subcategory.toLowerCase() !== filters.subcategory.toLowerCase()) {
-        return false;
-      }
-
-      // Price filter
-      if (product.price < filters.minPrice || product.price > filters.maxPrice) {
-        return false;
-      }
-
-      // Rating filter
-      if (filters.minRating > 0 && product.rating < filters.minRating) {
-        return false;
-      }
-
-      // Assured only
-      if (filters.assuredOnly && !product.assured) {
-        return false;
-      }
-
-      // Brand filter
-      if (filters.selectedBrands.length > 0 && !filters.selectedBrands.includes(product.brand)) {
-        return false;
-      }
-
-      // In stock only
-      if (filters.inStockOnly && !product.inStock) {
         return false;
       }
 
@@ -423,11 +420,7 @@ export default function App() {
   const isBrowsingMode = Boolean(
     filters.searchQuery || 
     filters.category !== 'all' || 
-    filters.subcategory || 
-    filters.selectedBrands.length > 0 || 
-    filters.assuredOnly || 
-    filters.minRating > 0 || 
-    filters.maxPrice < 200000
+    filters.subcategory
   );
 
   return (
@@ -444,8 +437,7 @@ export default function App() {
         onOpenAddressManager={() => setIsAddressModalOpen(true)}
         onResetToHome={handleResetToHome}
         superCoins={superCoins}
-        onOpenAuth={(role) => {
-          setAuthModalRole(role || 'customer');
+        onOpenAuth={() => {
           setIsAuthModalOpen(true);
         }}
         onOpenAdminDashboard={() => setIsAdminDashboardOpen(true)}
@@ -475,16 +467,6 @@ export default function App() {
             >
               <Shield className="w-3.5 h-3.5 text-yellow-300" />
               <span>Admin Portal (Products & Orders)</span>
-            </button>
-
-            <button
-              id="strip-switch-customer-btn"
-              onClick={() => demoLogin('customer')}
-              className="bg-white hover:bg-slate-100 text-slate-800 px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer border border-amber-600/30"
-              title="Quick switch to shopper view"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-[#0b8442]" />
-              <span>Switch to Customer</span>
             </button>
           </div>
         </div>
@@ -551,16 +533,6 @@ export default function App() {
             {/* Sort Bar & View Switcher */}
             <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap text-xs">
               
-              {/* Mobile Filter Button */}
-              <button
-                id="mobile-filter-trigger-btn"
-                onClick={() => setShowMobileFilters(true)}
-                className="lg:hidden flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span>Filters</span>
-              </button>
-
               {/* Sort Tabs */}
               <div className="flex items-center gap-1 overflow-x-auto text-slate-600">
                 <span className="font-bold text-slate-400 mr-1 hidden sm:inline">Sort By:</span>
@@ -654,61 +626,46 @@ export default function App() {
             </div>
           </div>
 
-          {/* Catalog Layout: Left Filter Sidebar (Desktop) + Right Product Results */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            
-            {/* Desktop Filters Sidebar (3 cols) */}
-            <div className="hidden lg:block lg:col-span-3">
-              <FilterSidebar
-                filters={filters}
-                onFilterChange={(newF) => setFilters((prev) => ({ ...prev, ...newF }))}
-                onResetFilters={() => setFilters(INITIAL_FILTERS)}
-                allProducts={products}
-              />
-            </div>
-
-            {/* Product Results Grid/List (9 cols) */}
-            <div className="lg:col-span-9">
-              {filteredProducts.length === 0 ? (
-                <div className="bg-white rounded-md p-12 text-center border border-slate-200 shadow-xs space-y-4">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
-                    <Search className="w-8 h-8" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-800">No matching products found</h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Check your spelling or try clearing some filters to expand your search.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setFilters(INITIAL_FILTERS)}
-                    className="px-5 py-2 bg-[#0b8442] text-white font-bold rounded text-xs hover:bg-emerald-700 transition-colors cursor-pointer"
-                  >
-                    Clear All Filters
-                  </button>
+          {/* Catalog Layout: Full Width Product Grid (Filters Removed Per Request) */}
+          <div className="w-full">
+            {filteredProducts.length === 0 ? (
+              <div className="bg-white rounded-md p-12 text-center border border-slate-200 shadow-xs space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                  <Search className="w-8 h-8" />
                 </div>
-              ) : (
-                <div className={
-                  viewMode === 'grid'
-                    ? 'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-4'
-                    : 'space-y-3'
-                }>
-                  {filteredProducts.map((product) => (
-                    <ProductCard
-                      key={product.id}
-                      product={product}
-                      isWishlisted={wishlistIds.includes(product.id)}
-                      onToggleWishlist={handleToggleWishlist}
-                      onSelectProduct={(p) => setSelectedProduct(p)}
-                      onAddToCart={handleAddToCart}
-                      onBuyNow={handleBuyNow}
-                      viewMode={viewMode}
-                    />
-                  ))}
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">No matching products found</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Try searching for another keyword or browse our categories above.
+                  </p>
                 </div>
-              )}
-            </div>
-
+                <button
+                  onClick={() => setFilters(INITIAL_FILTERS)}
+                  className="px-5 py-2 bg-[#0b8442] text-white font-bold rounded text-xs hover:bg-emerald-700 transition-colors cursor-pointer"
+                >
+                  Show All Products
+                </button>
+              </div>
+            ) : (
+              <div className={
+                viewMode === 'grid'
+                  ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4'
+                  : 'space-y-3'
+              }>
+                {filteredProducts.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    isWishlisted={wishlistIds.includes(product.id)}
+                    onToggleWishlist={handleToggleWishlist}
+                    onSelectProduct={(p) => setSelectedProduct(p)}
+                    onAddToCart={handleAddToCart}
+                    onBuyNow={handleBuyNow}
+                    viewMode={viewMode}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
         </div>
@@ -790,43 +747,6 @@ export default function App() {
         orders={orders}
       />
 
-      {/* Mobile Filter Drawer */}
-      {showMobileFilters && (
-        <div className="fixed inset-0 z-50 bg-black/50 lg:hidden flex justify-end">
-          <div className="w-80 bg-white h-full overflow-y-auto shadow-2xl p-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <h3 className="font-bold text-sm text-slate-800">Filter Products</h3>
-                <button 
-                  onClick={() => setShowMobileFilters(false)}
-                  className="p-1 text-slate-500 hover:text-slate-800"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="pt-3">
-                <FilterSidebar
-                  filters={filters}
-                  onFilterChange={(newF) => setFilters((prev) => ({ ...prev, ...newF }))}
-                  onResetFilters={() => setFilters(INITIAL_FILTERS)}
-                  allProducts={products}
-                />
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-200">
-              <button
-                onClick={() => setShowMobileFilters(false)}
-                className="w-full bg-[#0b8442] hover:bg-emerald-700 text-white font-bold py-2.5 rounded text-xs transition-colors cursor-pointer"
-              >
-                APPLY FILTERS
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Interactive Toast Notification */}
       {toastMessage && (
         <div 
@@ -842,7 +762,6 @@ export default function App() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        initialRole={authModalRole}
         onSuccess={() => {
           setIsAuthModalOpen(false);
           showToast(isAdmin ? 'Welcome, Store Admin!' : 'Logged in successfully with OTP!');
