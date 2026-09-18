@@ -2,14 +2,17 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with role-based permissions (customer or admin)",
+      "description": "User profile with role-based permissions (customer or admin) and user activity data",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "phone": { "type": "string" },
         "name": { "type": "string" },
         "role": { "type": "string", "enum": ["customer", "admin"] },
-        "createdAt": { "type": "string" }
+        "createdAt": { "type": "string" },
+        "cart": { "type": "array" },
+        "wishlist": { "type": "array" },
+        "addresses": { "type": "array" }
       },
       "required": ["id", "phone", "name", "role", "createdAt"]
     },
@@ -45,6 +48,7 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "userPhone": { "type": "string" },
         "customerName": { "type": "string" },
         "customerEmail": { "type": "string" },
         "items": { "type": "array" },

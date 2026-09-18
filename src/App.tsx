@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, CartItem, FilterState, Order, Address } from './types';
 import { PRODUCTS } from './data/products';
 import { Header } from './components/Header';
@@ -19,11 +19,20 @@ import { Footer } from './components/Footer';
 import { useAuth } from './context/AuthContext';
 import { 
   UserRole, 
+  UserProfile,
   addProductToFirestore, 
   updateProductInFirestore, 
   deleteProductFromFirestore,
   subscribeToProductsFromFirestore,
-  seedProductsToFirestoreIfEmpty 
+  seedProductsToFirestoreIfEmpty,
+  saveUserCartToFirestore,
+  getUserCartFromFirestore,
+  saveUserWishlistToFirestore,
+  getUserWishlistFromFirestore,
+  saveUserAddressesToFirestore,
+  getUserAddressesFromFirestore,
+  saveOrderToFirestore,
+  subscribeToOrdersFromFirestore
 } from './services/firebase';
 import { 
   LayoutGrid, 
@@ -48,8 +57,20 @@ const INITIAL_FILTERS: FilterState = {
   sortBy: 'relevance'
 };
 
+// Helper to extract a normalized 10-digit key for isolated per-user storage
+const getUserPhoneKey = (currentUser: { phone?: string; uid?: string } | null): string => {
+  if (!currentUser) return 'guest';
+  const rawDigits = currentUser.phone ? currentUser.phone.replace(/\D/g, '') : '';
+  const clean10 = rawDigits.slice(-10);
+  return clean10 || currentUser.uid || 'guest';
+};
+
 export default function App() {
   const { user, isAdmin, isCustomer } = useAuth();
+
+  // Active user phone key tracking
+  const initialKey = getUserPhoneKey(user);
+  const activeUserKeyRef = useRef<string>(initialKey);
 
   // Products with persistent local and live seller catalog updates from Firestore
   const [products, setProducts] = useState<Product[]>(() => {
@@ -90,41 +111,42 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
 
-  // Cart & Wishlist persistence
+  // Cart & Wishlist persistence - strictly isolated per user mobile number
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
     try {
-      const saved = localStorage.getItem('apnidukaan_cart') || localStorage.getItem('flipkart_cart');
-      return saved ? JSON.parse(saved) : [
-        { product: PRODUCTS[0], quantity: 1 } // Prepopulate with iPhone 15 for instant checkout demonstration
-      ];
-    } catch {
-      return [{ product: PRODUCTS[0], quantity: 1 }];
-    }
-  });
-
-  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('apnidukaan_wishlist') || localStorage.getItem('flipkart_wishlist');
-      return saved ? JSON.parse(saved) : ['mob-2', 'elec-2'];
-    } catch {
-      return ['mob-2', 'elec-2'];
-    }
-  });
-
-  // Orders persistence
-  const [orders, setOrders] = useState<Order[]>(() => {
-    try {
-      const saved = localStorage.getItem('apnidukaan_orders') || localStorage.getItem('flipkart_orders');
+      const currentKey = getUserPhoneKey(user);
+      const saved = localStorage.getItem(`apnidukaan_cart_${currentKey}`);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Addresses
+  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
+    try {
+      const currentKey = getUserPhoneKey(user);
+      const saved = localStorage.getItem(`apnidukaan_wishlist_${currentKey}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Orders persistence (all store orders, filtered per user for shopper views)
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      const saved = localStorage.getItem('apnidukaan_all_orders');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Addresses persistence - strictly isolated per user
   const [addresses, setAddresses] = useState<Address[]>(() => {
     try {
-      const saved = localStorage.getItem('apnidukaan_addresses');
+      const currentKey = getUserPhoneKey(user);
+      const saved = localStorage.getItem(`apnidukaan_addresses_${currentKey}`);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -154,38 +176,140 @@ export default function App() {
     }, 2800);
   };
 
-  // Sync to local storage
+  // Cleanup legacy global keys once on mount to avoid cross-user data leakage
   useEffect(() => {
     try {
-      localStorage.setItem('apnidukaan_addresses', JSON.stringify(addresses));
+      localStorage.removeItem('apnidukaan_cart');
+      localStorage.removeItem('flipkart_cart');
+      localStorage.removeItem('apnidukaan_wishlist');
+      localStorage.removeItem('flipkart_wishlist');
+      localStorage.removeItem('apnidukaan_orders');
+      localStorage.removeItem('flipkart_orders');
+      localStorage.removeItem('apnidukaan_addresses');
+    } catch {}
+  }, []);
+
+  // Real-time synchronization for orders collection from Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeToOrdersFromFirestore((dbOrders) => {
+      if (dbOrders && dbOrders.length > 0) {
+        setOrders(dbOrders);
+        try {
+          localStorage.setItem('apnidukaan_all_orders', JSON.stringify(dbOrders));
+        } catch {}
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // User switching isolation: load user-specific cart, wishlist, and addresses
+  useEffect(() => {
+    const newKey = getUserPhoneKey(user);
+    activeUserKeyRef.current = newKey;
+
+    // 1. Isolated Cart
+    const localCart = localStorage.getItem(`apnidukaan_cart_${newKey}`);
+    if (localCart !== null) {
+      try {
+        setCartItems(JSON.parse(localCart));
+      } catch {
+        setCartItems([]);
+      }
+    } else {
+      setCartItems([]);
+      if (user?.uid) {
+        getUserCartFromFirestore(user.uid).then((cloudCart) => {
+          if (cloudCart && activeUserKeyRef.current === newKey) {
+            setCartItems(cloudCart);
+            try {
+              localStorage.setItem(`apnidukaan_cart_${newKey}`, JSON.stringify(cloudCart));
+            } catch {}
+          }
+        }).catch(console.warn);
+      }
+    }
+
+    // 2. Isolated Wishlist
+    const localWishlist = localStorage.getItem(`apnidukaan_wishlist_${newKey}`);
+    if (localWishlist !== null) {
+      try {
+        setWishlistIds(JSON.parse(localWishlist));
+      } catch {
+        setWishlistIds([]);
+      }
+    } else {
+      setWishlistIds([]);
+      if (user?.uid) {
+        getUserWishlistFromFirestore(user.uid).then((cloudWishlist) => {
+          if (cloudWishlist && activeUserKeyRef.current === newKey) {
+            setWishlistIds(cloudWishlist);
+            try {
+              localStorage.setItem(`apnidukaan_wishlist_${newKey}`, JSON.stringify(cloudWishlist));
+            } catch {}
+          }
+        }).catch(console.warn);
+      }
+    }
+
+    // 3. Isolated Addresses
+    const localAddrs = localStorage.getItem(`apnidukaan_addresses_${newKey}`);
+    if (localAddrs !== null) {
+      try {
+        setAddresses(JSON.parse(localAddrs));
+      } catch {
+        setAddresses([]);
+      }
+    } else {
+      setAddresses([]);
+      if (user?.uid) {
+        getUserAddressesFromFirestore(user.uid).then((cloudAddrs) => {
+          if (cloudAddrs && activeUserKeyRef.current === newKey) {
+            setAddresses(cloudAddrs);
+            try {
+              localStorage.setItem(`apnidukaan_addresses_${newKey}`, JSON.stringify(cloudAddrs));
+            } catch {}
+          }
+        }).catch(console.warn);
+      }
+    }
+  }, [user]);
+
+  // Persist user-isolated state to localStorage and Firestore
+  useEffect(() => {
+    const key = activeUserKeyRef.current;
+    try {
+      localStorage.setItem(`apnidukaan_cart_${key}`, JSON.stringify(cartItems));
     } catch (e) {
       console.error(e);
     }
-  }, [addresses]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('apnidukaan_cart', JSON.stringify(cartItems));
-    } catch (e) {
-      console.error(e);
+    if (user?.uid) {
+      saveUserCartToFirestore(user.uid, cartItems).catch(console.warn);
     }
   }, [cartItems]);
 
   useEffect(() => {
+    const key = activeUserKeyRef.current;
     try {
-      localStorage.setItem('apnidukaan_wishlist', JSON.stringify(wishlistIds));
+      localStorage.setItem(`apnidukaan_wishlist_${key}`, JSON.stringify(wishlistIds));
     } catch (e) {
       console.error(e);
+    }
+    if (user?.uid) {
+      saveUserWishlistToFirestore(user.uid, wishlistIds).catch(console.warn);
     }
   }, [wishlistIds]);
 
   useEffect(() => {
+    const key = activeUserKeyRef.current;
     try {
-      localStorage.setItem('apnidukaan_orders', JSON.stringify(orders));
+      localStorage.setItem(`apnidukaan_addresses_${key}`, JSON.stringify(addresses));
     } catch (e) {
       console.error(e);
     }
-  }, [orders]);
+    if (user?.uid) {
+      saveUserAddressesToFirestore(user.uid, addresses).catch(console.warn);
+    }
+  }, [addresses]);
 
   // Handle Cart Operations
   const handleAddToCart = (product: Product) => {
@@ -294,12 +418,37 @@ export default function App() {
   };
 
   // Handle Order Success
-  const handleOrderSuccess = (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
-    setLastPlacedOrder(newOrder);
-    setCartItems([]); // Clear cart
+  const handleOrderSuccess = async (newOrder: Order) => {
+    const currentKey = activeUserKeyRef.current;
+    const enrichedOrder: Order = {
+      ...newOrder,
+      userId: user?.uid || (currentKey !== 'guest' ? `user-phone-${currentKey}` : 'guest'),
+      userPhone: currentKey !== 'guest' ? currentKey : (newOrder.address?.phone?.replace(/\D/g, '').slice(-10) || '')
+    };
+
+    setOrders((prev) => [enrichedOrder, ...prev]);
+    setLastPlacedOrder(enrichedOrder);
+    
+    // Clear cart for this specific active user
+    setCartItems([]);
+    try {
+      localStorage.setItem(`apnidukaan_cart_${currentKey}`, JSON.stringify([]));
+      if (user?.uid) {
+        saveUserCartToFirestore(user.uid, []);
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+
+    // Persist order to Firestore
+    try {
+      await saveOrderToFirestore(enrichedOrder);
+    } catch (e) {
+      console.warn('Firestore order save error:', e);
+    }
+
     // Reward SuperCoins
-    const earnedCoins = newOrder.items.reduce((sum, i) => sum + i.product.superCoins * i.quantity, 0);
+    const earnedCoins = enrichedOrder.items.reduce((sum, i) => sum + i.product.superCoins * i.quantity, 0);
     setSuperCoins((prev) => prev + earnedCoins);
     
     setIsCheckoutOpen(false);
@@ -407,6 +556,18 @@ export default function App() {
   const wishlistProducts = useMemo(() => {
     return products.filter((p) => wishlistIds.includes(p.id));
   }, [products, wishlistIds]);
+
+  // Orders strictly belonging to the currently active mobile number or user UID
+  const userOrders = useMemo(() => {
+    const currentKey = getUserPhoneKey(user);
+    if (!user || currentKey === 'guest') {
+      return orders.filter(o => !o.userId || o.userId === 'guest' || !o.userPhone);
+    }
+    return orders.filter(o => {
+      const cleanOrderPhone = o.userPhone ? o.userPhone.replace(/\D/g, '').slice(-10) : '';
+      return (cleanOrderPhone && cleanOrderPhone === currentKey) || (user.uid && o.userId === user.uid);
+    });
+  }, [orders, user]);
 
   // Featured lists for Deal Shelves
   const dealsOfTheDay = useMemo(() => {
@@ -740,11 +901,13 @@ export default function App() {
         onViewOrders={() => setIsMyOrdersOpen(true)}
       />
 
-      {/* My Orders Modal */}
+      {/* My Orders Modal (strictly filtered to active user's phone/UID) */}
       <MyOrdersModal
         isOpen={isMyOrdersOpen}
         onClose={() => setIsMyOrdersOpen(false)}
-        orders={orders}
+        orders={userOrders}
+        currentUser={user}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Interactive Toast Notification */}

@@ -48,6 +48,8 @@ export type PaymentMethodType = 'UPI' | 'CARD' | 'NET_BANKING' | 'COD' | 'EMI' |
 
 export interface Order {
   id: string;
+  userId?: string;
+  userPhone?: string;
   date: string;
   items: CartItem[];
   totalAmount: number;

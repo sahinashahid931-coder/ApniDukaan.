@@ -24,7 +24,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Product } from '../types';
+import { Product, CartItem, Address, Order } from '../types';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -219,3 +219,170 @@ export async function seedProductsToFirestoreIfEmpty(initialProducts: Product[])
     console.warn('Seeding initial products failed:', e);
   }
 }
+
+/**
+ * Save user cart strictly isolated to a specific user UID/phone
+ */
+export async function saveUserCartToFirestore(userId: string, cart: CartItem[]): Promise<void> {
+  if (!userId) return;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    await setDoc(userDocRef, {
+      cart,
+      cartUpdatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Fetch user cart from Firestore
+ */
+export async function getUserCartFromFirestore(userId: string): Promise<CartItem[] | null> {
+  if (!userId) return null;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return (data.cart as CartItem[]) || [];
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+/**
+ * Save user wishlist strictly isolated to a specific user UID/phone
+ */
+export async function saveUserWishlistToFirestore(userId: string, wishlist: string[]): Promise<void> {
+  if (!userId) return;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    await setDoc(userDocRef, {
+      wishlist,
+      wishlistUpdatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Fetch user wishlist from Firestore
+ */
+export async function getUserWishlistFromFirestore(userId: string): Promise<string[] | null> {
+  if (!userId) return null;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return (data.wishlist as string[]) || [];
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+/**
+ * Save user delivery addresses strictly isolated to a specific user UID/phone
+ */
+export async function saveUserAddressesToFirestore(userId: string, addresses: Address[]): Promise<void> {
+  if (!userId) return;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    await setDoc(userDocRef, {
+      addresses,
+      addressesUpdatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Fetch user delivery addresses from Firestore
+ */
+export async function getUserAddressesFromFirestore(userId: string): Promise<Address[] | null> {
+  if (!userId) return null;
+  const path = `users/${userId}`;
+  try {
+    const userDocRef = doc(db, 'users', userId);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return (data.addresses as Address[]) || [];
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+/**
+ * Save an order to Firestore orders collection with userId and userPhone
+ */
+export async function saveOrderToFirestore(order: Order): Promise<void> {
+  const path = `orders/${order.id}`;
+  try {
+    const orderDocRef = doc(db, 'orders', order.id);
+    await setDoc(orderDocRef, {
+      ...order,
+      createdAt: new Date().toISOString()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    throw error;
+  }
+}
+
+/**
+ * Fetch all orders from Firestore (used by admin or for local synchronization)
+ */
+export async function getAllOrdersFromFirestore(): Promise<Order[]> {
+  const path = 'orders';
+  try {
+    const snap = await getDocs(collection(db, path));
+    if (snap.empty) return [];
+    return snap.docs.map(d => d.data() as Order);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+/**
+ * Real-time subscription to Firestore orders collection
+ */
+export function subscribeToOrdersFromFirestore(
+  onUpdate: (orders: Order[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const path = 'orders';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      if (!snapshot.empty) {
+        const ords = snapshot.docs.map(d => d.data() as Order);
+        onUpdate(ords);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+      onError?.(error);
+    }
+  );
+}
+

@@ -355,8 +355,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setTimeout(() => {
       setIsProcessing(false);
+      const cleanPhone = user?.phone ? user.phone.replace(/\D/g, '').slice(-10) : (selectedAddress?.phone?.replace(/\D/g, '').slice(-10) || '');
       const newOrder: Order = {
         id: `OD${Math.floor(100000000000 + Math.random() * 900000000000)}`,
+        userId: user?.uid || (cleanPhone ? `user-phone-${cleanPhone}` : 'guest'),
+        userPhone: cleanPhone,
         date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
         items: cartItems,
         totalAmount: finalAmount,
