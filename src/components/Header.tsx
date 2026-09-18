@@ -20,7 +20,8 @@ import {
   Settings,
   ArrowRightLeft,
   Shield,
-  Smartphone
+  Smartphone,
+  MapPin
 } from 'lucide-react';
 import { POPULAR_SEARCH_TAGS } from '../data/products';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +35,7 @@ interface HeaderProps {
   onOpenCart: () => void;
   onOpenWishlist: () => void;
   onOpenOrders: () => void;
+  onOpenAddressManager?: () => void;
   onResetToHome: () => void;
   superCoins: number;
   onOpenAuth: (role?: UserRole) => void;
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCart,
   onOpenWishlist,
   onOpenOrders,
+  onOpenAddressManager,
   onResetToHome,
   superCoins,
   onOpenAuth,
@@ -339,6 +342,20 @@ export const Header: React.FC<HeaderProps> = ({
                         <span>My Orders</span>
                       </button>
 
+                      {onOpenAddressManager && (
+                        <button
+                          id="menu-addresses-btn"
+                          onClick={() => {
+                            onOpenAddressManager();
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-3 text-xs font-medium transition-colors cursor-pointer"
+                        >
+                          <MapPin className="w-4 h-4 text-[#0b8442]" />
+                          <span>Saved Delivery Addresses</span>
+                        </button>
+                      )}
+
                       <button
                         id="menu-wishlist-btn"
                         onClick={() => {
@@ -514,6 +531,16 @@ export const Header: React.FC<HeaderProps> = ({
                   <Package className="w-4 h-4 text-[#0b8442]" />
                   <span>My Orders</span>
                 </button>
+
+                {onOpenAddressManager && (
+                  <button 
+                    onClick={() => { onOpenAddressManager(); setShowMobileMenu(false); }}
+                    className="w-full text-left px-3 py-2.5 rounded-md hover:bg-slate-100 flex items-center gap-3 text-sm font-medium"
+                  >
+                    <MapPin className="w-4 h-4 text-[#0b8442]" />
+                    <span>Saved Delivery Addresses</span>
+                  </button>
+                )}
 
                 <button 
                   onClick={() => { onOpenWishlist(); setShowMobileMenu(false); }}

@@ -9,6 +9,7 @@ interface ProductCardProps {
   onToggleWishlist: (product: Product) => void;
   onSelectProduct: (product: Product) => void;
   onAddToCart: (product: Product) => void;
+  onBuyNow?: (product: Product) => void;
   viewMode?: 'grid' | 'list';
 }
 
@@ -18,6 +19,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onToggleWishlist,
   onSelectProduct,
   onAddToCart,
+  onBuyNow,
   viewMode = 'grid'
 }) => {
   if (viewMode === 'list') {
@@ -113,18 +115,31 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </p>
           </div>
 
-          <div className="pt-3">
+          <div className="pt-3 flex gap-2">
             <button
               id={`add-to-cart-btn-${product.id}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onAddToCart(product);
               }}
-              className="w-full bg-[#ff9f00] hover:bg-[#f39700] active:scale-95 text-white font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+              className="flex-1 bg-[#ff9f00] hover:bg-[#f39700] active:scale-95 text-white font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
             >
               <ShoppingCart className="w-3.5 h-3.5" />
               <span>ADD TO CART</span>
             </button>
+            {onBuyNow && (
+              <button
+                id={`buy-now-btn-${product.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBuyNow(product);
+                }}
+                className="flex-1 bg-[#fb641b] hover:bg-[#e95a12] active:scale-95 text-white font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>BUY NOW</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -215,18 +230,34 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <span>{product.fastDelivery ? 'Free Delivery Tomorrow' : 'Standard Delivery'}</span>
         </p>
 
-        <div className="mt-2.5 pt-1">
+        <div className="mt-2.5 pt-1 flex gap-1.5">
           <button
             id={`add-to-cart-grid-${product.id}`}
             onClick={(e) => {
               e.stopPropagation();
               onAddToCart(product);
             }}
-            className="w-full bg-[#ff9f00] hover:bg-[#f39700] active:scale-95 text-white font-bold py-1.5 sm:py-2 px-2 rounded text-xs transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+            className="flex-1 bg-[#ff9f00] hover:bg-[#f39700] active:scale-95 text-white font-bold py-1.5 sm:py-2 px-1 rounded text-[11px] sm:text-xs transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+            title="Add to Cart"
           >
-            <ShoppingCart className="w-3.5 h-3.5" />
-            <span>ADD TO CART</span>
+            <ShoppingCart className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span className="truncate">Add to Cart</span>
           </button>
+
+          {onBuyNow && (
+            <button
+              id={`buy-now-grid-${product.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBuyNow(product);
+              }}
+              className="flex-1 bg-[#fb641b] hover:bg-[#e95a12] active:scale-95 text-white font-bold py-1.5 sm:py-2 px-1 rounded text-[11px] sm:text-xs transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+              title="Buy Now (Check address & checkout)"
+            >
+              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current" />
+              <span className="truncate">Buy Now</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Product, CartItem, FilterState, Order } from './types';
+import { Product, CartItem, FilterState, Order, Address } from './types';
 import { PRODUCTS } from './data/products';
 import { Header } from './components/Header';
 import { CategoryBar } from './components/CategoryBar';
@@ -11,6 +11,7 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { WishlistDrawer } from './components/WishlistDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
+import { AddressModal } from './components/AddressModal';
 import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { MyOrdersModal } from './components/MyOrdersModal';
 import { AuthModal } from './components/AuthModal';
@@ -113,6 +114,16 @@ export default function App() {
     }
   });
 
+  // Addresses
+  const [addresses, setAddresses] = useState<Address[]>(() => {
+    try {
+      const saved = localStorage.getItem('apnidukaan_addresses');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // SuperCoins
   const [superCoins, setSuperCoins] = useState<number>(420);
 
@@ -121,6 +132,7 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isWishlistOpen, setIsWishlistOpen] = useState<boolean>(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState<boolean>(false);
   const [isOrderSuccessOpen, setIsOrderSuccessOpen] = useState<boolean>(false);
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState<boolean>(false);
   const [lastPlacedOrder, setLastPlacedOrder] = useState<Order | null>(null);
@@ -136,6 +148,14 @@ export default function App() {
   };
 
   // Sync to local storage
+  useEffect(() => {
+    try {
+      localStorage.setItem('apnidukaan_addresses', JSON.stringify(addresses));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [addresses]);
+
   useEffect(() => {
     try {
       localStorage.setItem('apnidukaan_cart', JSON.stringify(cartItems));
@@ -228,6 +248,42 @@ export default function App() {
     }
     setSelectedProduct(null);
     setIsCheckoutOpen(true);
+  };
+
+  // Address Management Handlers
+  const handleSaveAddress = (address: Address) => {
+    setAddresses((prev) => {
+      const exists = prev.some((a) => a.id === address.id);
+      if (exists) {
+        return prev.map((a) => (a.id === address.id ? address : a));
+      }
+      // If it's the first address or marked default, set it as default
+      const isDefault = prev.length === 0 || address.isDefault;
+      const updatedList = prev.map((a) => (isDefault ? { ...a, isDefault: false } : a));
+      return [...updatedList, { ...address, isDefault }];
+    });
+    showToast('Delivery address saved successfully!');
+  };
+
+  const handleDeleteAddress = (addressId: string) => {
+    setAddresses((prev) => {
+      const filtered = prev.filter((a) => a.id !== addressId);
+      if (filtered.length > 0 && !filtered.some((a) => a.isDefault)) {
+        filtered[0].isDefault = true;
+      }
+      return filtered;
+    });
+    showToast('Delivery address deleted');
+  };
+
+  const handleSetDefaultAddress = (addressId: string) => {
+    setAddresses((prev) =>
+      prev.map((a) => ({
+        ...a,
+        isDefault: a.id === addressId
+      }))
+    );
+    showToast('Default delivery address updated');
   };
 
   // Handle Order Success
@@ -385,6 +441,7 @@ export default function App() {
         onOpenCart={() => setIsCartOpen(true)}
         onOpenWishlist={() => setIsWishlistOpen(true)}
         onOpenOrders={() => setIsMyOrdersOpen(true)}
+        onOpenAddressManager={() => setIsAddressModalOpen(true)}
         onResetToHome={handleResetToHome}
         superCoins={superCoins}
         onOpenAuth={(role) => {
@@ -644,6 +701,7 @@ export default function App() {
                       onToggleWishlist={handleToggleWishlist}
                       onSelectProduct={(p) => setSelectedProduct(p)}
                       onAddToCart={handleAddToCart}
+                      onBuyNow={handleBuyNow}
                       viewMode={viewMode}
                     />
                   ))}
@@ -701,7 +759,20 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         cartItems={cartItems}
         superCoins={superCoins}
+        addresses={addresses}
+        onSaveAddress={handleSaveAddress}
+        onDeleteAddress={handleDeleteAddress}
         onOrderSuccess={handleOrderSuccess}
+      />
+
+      {/* Address Management Modal */}
+      <AddressModal
+        isOpen={isAddressModalOpen}
+        onClose={() => setIsAddressModalOpen(false)}
+        addresses={addresses}
+        onSaveAddress={handleSaveAddress}
+        onDeleteAddress={handleDeleteAddress}
+        onSetDefaultAddress={handleSetDefaultAddress}
       />
 
       {/* Order Confirmed Celebration Modal */}
