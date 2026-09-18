@@ -1,0 +1,6 @@
+{
+  "name": "ApniDukaan",
+  "description": "ApniDukaan - India's favorite online shopping destination for Mobiles, Electronics, Fashion, Home, Grocery & more with big savings and secure payment checkout.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

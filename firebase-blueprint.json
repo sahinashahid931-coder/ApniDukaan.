@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based permissions (customer or admin)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "phone": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "phone", "name", "role", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product catalog item managed centrally by Store Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "brand": { "type": "string" },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "discountPercentage": { "type": "number" },
+        "rating": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "assured": { "type": "boolean" },
+        "stock": { "type": "number" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "specs": { "type": "object" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "brand", "category", "price", "stock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer orders placed on ApniDukaan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "items": { "type": "array" },
+        "deliveryAddress": { "type": "object" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "orderStatus": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "totalDiscount": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "items", "deliveryAddress", "paymentMethod", "orderStatus", "totalAmount", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "entity": "User",
+      "description": "User profile collection"
+    },
+    "/products/{productId}": {
+      "entity": "Product",
+      "description": "E-commerce product catalog"
+    },
+    "/orders/{orderId}": {
+      "entity": "Order",
+      "description": "Order records collection"
+    }
+  }
+}
