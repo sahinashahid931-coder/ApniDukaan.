@@ -6,23 +6,21 @@ import {
   Check, 
   ShieldCheck, 
   Lock, 
-  CreditCard, 
   Smartphone, 
-  Building2, 
-  Banknote, 
-  CalendarClock,
-  Sparkles,
-  QrCode,
   AlertCircle,
   CheckCircle2,
   ChevronRight,
   Plus,
-  ArrowLeft,
   MapPin,
   Home,
-  Briefcase
+  Briefcase,
+  Loader2,
+  ArrowRight,
+  UserCheck,
+  CheckCircle
 } from 'lucide-react';
-import { formatPrice, formatCardNumber, formatExpiry, getEstimatedDeliveryDate } from '../utils/formatters';
+import { formatPrice, getEstimatedDeliveryDate } from '../utils/formatters';
+import { INDIAN_STATES, lookupPincode } from '../utils/pincode';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -34,14 +32,6 @@ interface CheckoutModalProps {
   onDeleteAddress?: (addressId: string) => void;
   onOrderSuccess: (order: Order) => void;
 }
-
-const INDIAN_STATES = [
-  'Andhra Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 
-  'Delhi NCR', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 
-  'Jammu & Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 
-  'Maharashtra', 'Odisha', 'Punjab', 'Rajasthan', 'Tamil Nadu', 
-  'Telangana', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
-];
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
@@ -55,10 +45,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const { user } = useAuth();
+  const { user, sendMobileOtp, verifyMobileOtp, logout } = useAuth();
 
-  // Checkout Steps: 1: Address, 2: Order Summary, 3: Payment
-  const [activeStep, setActiveStep] = useState<number>(1);
+  // Checkout Steps: 
+  // Step 1: Login Check (if user is not logged in)
+  // Step 2: Delivery Address
+  // Step 3: Order Summary
+  // Step 4: Payment Options (UPI Only)
+  const [activeStep, setActiveStep] = useState<number>(() => {
+    if (!user) return 1; // Needs login
+    if (addresses.length === 0) return 2; // Needs address
+    return 2; // Start at address confirmation
+  });
+
+  // Step 1: In-checkout Login state
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginOtp, setLoginOtp] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginSuccessMsg, setLoginSuccessMsg] = useState<string | null>(null);
+
+  // Address state
   const [selectedAddressId, setSelectedAddressId] = useState<string>(() => {
     return addresses.find(a => a.isDefault)?.id || addresses[0]?.id || '';
   });
@@ -74,48 +83,88 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   }, [addresses, selectedAddressId]);
 
-  // New Address Form State
+  // If user logs in while modal is open, advance from step 1 to step 2
+  useEffect(() => {
+    if (user && activeStep === 1) {
+      setActiveStep(2);
+    }
+  }, [user]);
+
+  // New Address Form State - blank by default (no hardcoded Bangalore)
   const [newAddr, setNewAddr] = useState<Partial<Address>>({
     name: user?.displayName || '',
     phone: user?.phone?.replace(/\D/g, '').slice(-10) || '',
     pincode: '',
     locality: '',
     address: '',
-    city: 'Bengaluru',
-    state: 'Karnataka',
+    city: '',
+    state: '',
     landmark: '',
     type: 'HOME'
   });
 
   const [addrError, setAddrError] = useState<string | null>(null);
+  const [isLookingUpPincode, setIsLookingUpPincode] = useState<boolean>(false);
+  const [pincodeSuccessMsg, setPincodeSuccessMsg] = useState<string | null>(null);
 
-  // Payment states
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethodType>('UPI');
-  const [upiOption, setUpiOption] = useState<'app' | 'id' | 'qr'>('app');
-  const [upiId, setUpiId] = useState('');
-  const [upiApp, setUpiApp] = useState('Google Pay');
+  // Automatic Pincode Lookup when 6 digits are typed
+  useEffect(() => {
+    const cleanPin = (newAddr.pincode || '').replace(/\D/g, '').trim();
+    if (cleanPin.length === 6) {
+      let isMounted = true;
+      setIsLookingUpPincode(true);
+      setPincodeSuccessMsg(null);
 
-  // Card details
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
+      lookupPincode(cleanPin)
+        .then((res) => {
+          if (!isMounted) return;
+          if (res.success) {
+            setNewAddr((prev) => ({
+              ...prev,
+              city: res.city,
+              state: res.state,
+              locality: (!prev.locality && res.localities && res.localities.length > 0) ? res.localities[0] : prev.locality
+            }));
+            setPincodeSuccessMsg(`Auto-detected: ${res.city}, ${res.state}`);
+            setAddrError(null);
+          } else {
+            setPincodeSuccessMsg(null);
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsLookingUpPincode(false);
+        });
 
-  // Net banking
-  const [selectedBank, setSelectedBank] = useState('HDFC Bank');
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setPincodeSuccessMsg(null);
+    }
+  }, [newAddr.pincode]);
 
-  // COD Captcha
-  const [captchaCode, setCaptchaCode] = useState('8492');
-  const [userCaptcha, setUserCaptcha] = useState('');
+  // UPI Only Payment States
+  const selectedPaymentMethod: PaymentMethodType = 'UPI';
+  const [selectedUpiOption, setSelectedUpiOption] = useState<'GPAY' | 'PHONEPE' | 'PAYTM' | 'BHIM' | 'CUSTOM'>('GPAY');
+  const [upiIdentifier, setUpiIdentifier] = useState<string>(() => {
+    return user?.phone?.replace(/\D/g, '').slice(-10) || '';
+  });
+  const [isVerifyingUpi, setIsVerifyingUpi] = useState<boolean>(false);
+  const [isUpiVerified, setIsUpiVerified] = useState<boolean>(false);
+  const [upiError, setUpiError] = useState<string | null>(null);
+  const [verifiedUpiDetails, setVerifiedUpiDetails] = useState<{
+    identifier: string;
+    accountHolder: string;
+    bankName: string;
+  } | null>(null);
 
   // SuperCoins applied
   const [useSuperCoins, setUseSuperCoins] = useState(false);
 
-  // Payment processing & 2FA modal
+  // Payment processing & UPI MPIN modal
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpValue, setOtpValue] = useState('123456');
-  const [otpTimer, setOtpTimer] = useState(30);
+  const [showUpiPinModal, setShowUpiPinModal] = useState(false);
+  const [upiMpin, setUpiMpin] = useState('');
 
   // Calculate pricing
   const totalMRP = cartItems.reduce((sum, i) => sum + i.product.originalPrice * i.quantity, 0);
@@ -127,19 +176,44 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const selectedAddress = addresses.find(a => a.id === selectedAddressId) || addresses[0] || null;
 
-  const handleFillDemoAddress = () => {
-    setNewAddr({
-      name: user?.displayName || 'Sahina Shahid',
-      phone: user?.phone?.replace(/\D/g, '').slice(-10) || '9876543210',
-      pincode: '560001',
-      locality: 'MG Road, Ashok Nagar',
-      address: '#42, Prestige Meridian Towers, 5th Floor',
-      city: 'Bengaluru',
-      state: 'Karnataka',
-      landmark: 'Near Trinity Metro Station',
-      type: 'HOME'
-    });
-    setAddrError(null);
+  // Login handlers in Step 1
+  const handleSendLoginOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError(null);
+    const cleanDigits = loginPhone.replace(/\D/g, '');
+    if (cleanDigits.length < 10) {
+      setLoginError('Please enter a valid 10-digit mobile number');
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      const res = await sendMobileOtp(cleanDigits);
+      setOtpSent(true);
+      setLoginSuccessMsg(`OTP sent to +91 ${cleanDigits.slice(-10)} (Testing code: ${res.otp || '123456'})`);
+      if (res.otp) setLoginOtp(res.otp);
+    } catch (err: any) {
+      setLoginError(err.message || 'Failed to send OTP');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleVerifyLoginOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError(null);
+    if (!loginOtp.trim() || loginOtp.trim().length !== 6) {
+      setLoginError('Please enter the 6-digit OTP');
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      await verifyMobileOtp(loginPhone, loginOtp, loginName || 'Customer');
+      setActiveStep(2); // Proceed to address
+    } catch (err: any) {
+      setLoginError(err.message || 'Invalid OTP. Please check or use code 123456');
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
   const handleAddNewAddress = (e: React.FormEvent) => {
@@ -160,16 +234,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setAddrError('Please enter flat/house no. and building address');
       return;
     }
+    if (!newAddr.city?.trim()) {
+      setAddrError('Please enter City / District');
+      return;
+    }
+    if (!newAddr.state?.trim()) {
+      setAddrError('Please select State');
+      return;
+    }
 
     const created: Address = {
       id: `addr-${Date.now()}`,
       name: newAddr.name.trim(),
       phone: newAddr.phone.trim(),
       pincode: newAddr.pincode.trim(),
-      locality: newAddr.locality?.trim() || 'City Center',
+      locality: newAddr.locality?.trim() || 'Locality',
       address: newAddr.address.trim(),
-      city: newAddr.city?.trim() || 'Bengaluru',
-      state: newAddr.state?.trim() || 'Karnataka',
+      city: newAddr.city.trim(),
+      state: newAddr.state.trim(),
       landmark: newAddr.landmark?.trim() || undefined,
       type: newAddr.type || 'HOME',
       isDefault: addresses.length === 0
@@ -179,45 +261,97 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setSelectedAddressId(created.id);
     setShowNewAddressForm(false);
     setAddrError(null);
-    // Smoothly advance to Order Summary
-    setActiveStep(2);
+    setPincodeSuccessMsg(null);
+    setActiveStep(3); // Advance to Order Summary
+  };
+
+  // UPI Verification handler
+  const handleVerifyUpi = () => {
+    setUpiError(null);
+    const id = upiIdentifier.trim();
+    if (!id) {
+      setUpiError('Please enter your 10-digit mobile number or UPI ID (e.g. 9876543210 or yourname@okhdfcbank)');
+      return;
+    }
+
+    // Check if valid mobile or valid UPI ID
+    const isMobile = /^\d{10}$/.test(id.replace(/\D/g, ''));
+    const isUpiVpa = id.includes('@') && id.split('@')[1]?.length >= 2;
+
+    if (!isMobile && !isUpiVpa) {
+      setUpiError('Please enter a valid 10-digit mobile number OR a valid UPI ID (e.g. mobile@upi or name@okaxis)');
+      return;
+    }
+
+    setIsVerifyingUpi(true);
+    setTimeout(() => {
+      setIsVerifyingUpi(false);
+      setIsUpiVerified(true);
+      const appName = 
+        selectedUpiOption === 'GPAY' ? 'Google Pay' :
+        selectedUpiOption === 'PHONEPE' ? 'PhonePe' :
+        selectedUpiOption === 'PAYTM' ? 'Paytm' :
+        selectedUpiOption === 'BHIM' ? 'BHIM UPI' : 'UPI Direct';
+
+      setVerifiedUpiDetails({
+        identifier: isMobile ? `${id.replace(/\D/g, '')}@${selectedUpiOption === 'GPAY' ? 'okhdfcbank' : selectedUpiOption === 'PHONEPE' ? 'ybl' : 'paytm'}` : id,
+        accountHolder: user?.displayName || 'Sahina Shahid',
+        bankName: `${appName} • Verified via NPCI Network`
+      });
+      setUpiError(null);
+    }, 700);
+  };
+
+  const handleSelectUpiApp = (opt: 'GPAY' | 'PHONEPE' | 'PAYTM' | 'BHIM' | 'CUSTOM') => {
+    setSelectedUpiOption(opt);
+    setIsUpiVerified(false);
+    setVerifiedUpiDetails(null);
+    setUpiError(null);
+    // If empty and user has phone, pre-fill
+    if (!upiIdentifier && user?.phone) {
+      setUpiIdentifier(user.phone.replace(/\D/g, '').slice(-10));
+    }
   };
 
   const handleTriggerPayment = () => {
-    if (!selectedAddress) {
-      alert('Please provide and select a delivery address before placing order.');
+    if (!user) {
+      alert('Please complete the login step first.');
       setActiveStep(1);
+      return;
+    }
+
+    if (!selectedAddress) {
+      alert('Please add and select a delivery address before placing order.');
+      setActiveStep(2);
       setShowNewAddressForm(true);
       return;
     }
 
-    if (selectedPaymentMethod === 'CARD') {
-      // Show simulated 3D Secure / OTP Verification
-      setShowOtpModal(true);
+    if (!isUpiVerified) {
+      alert('Please enter and verify your mobile number or UPI ID before proceeding to payment.');
       return;
     }
 
-    if (selectedPaymentMethod === 'COD') {
-      if (userCaptcha !== captchaCode) {
-        alert('Please enter the correct verification code for Cash on Delivery');
-        return;
-      }
-    }
-
-    // Direct process
-    finalizeOrder();
+    // Open UPI PIN verification modal
+    setShowUpiPinModal(true);
   };
 
   const finalizeOrder = () => {
     if (!selectedAddress) {
       alert('Please add and select your delivery address to place this order.');
-      setActiveStep(1);
+      setActiveStep(2);
       setShowNewAddressForm(true);
       return;
     }
 
+    setShowUpiPinModal(false);
     setIsProcessing(true);
-    setShowOtpModal(false);
+
+    const appLabel = 
+      selectedUpiOption === 'GPAY' ? 'Google Pay' :
+      selectedUpiOption === 'PHONEPE' ? 'PhonePe' :
+      selectedUpiOption === 'PAYTM' ? 'Paytm UPI' :
+      selectedUpiOption === 'BHIM' ? 'BHIM' : 'UPI';
 
     setTimeout(() => {
       setIsProcessing(false);
@@ -229,19 +363,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         discountAmount: totalDiscount + coinsDiscount,
         deliveryCharge: 0,
         address: selectedAddress,
-        paymentMethod: selectedPaymentMethod,
+        paymentMethod: 'UPI',
         paymentDetails: {
-          transactionId: `TXN${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-          upiId: selectedPaymentMethod === 'UPI' ? (upiId || `${upiApp.toLowerCase().replace(/\s/g, '')}@okaxis`) : undefined,
-          cardLast4: selectedPaymentMethod === 'CARD' ? (cardNumber.slice(-4) || '4242') : undefined,
-          bankName: selectedPaymentMethod === 'NET_BANKING' ? selectedBank : undefined
+          transactionId: `UPI${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+          upiId: verifiedUpiDetails?.identifier || `${upiIdentifier}@upi`,
+          bankName: verifiedUpiDetails?.bankName || `${appLabel} UPI`
         },
         trackingStatus: 'CONFIRMED',
         estimatedDeliveryDate: getEstimatedDeliveryDate(true)
       };
 
       onOrderSuccess(newOrder);
-    }, 2000);
+    }, 1800);
   };
 
   return (
@@ -253,10 +386,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         {/* Header with Security Badge */}
         <div className="bg-[#0b8442] text-white px-4 sm:px-6 py-3.5 flex items-center justify-between shadow-md">
           <div className="flex items-center gap-3">
-            <h2 className="text-base sm:text-lg font-bold">ApniDukaan Secure Checkout</h2>
+            <h2 className="text-base sm:text-lg font-bold">ApniDukaan Checkout</h2>
             <div className="hidden sm:flex items-center gap-1 bg-emerald-700/60 px-2.5 py-0.5 rounded text-xs font-medium border border-emerald-500/30">
               <Lock className="w-3 h-3 text-emerald-300" />
-              <span>256-Bit SSL Encrypted</span>
+              <span>100% Secure UPI Payment</span>
             </div>
           </div>
           <button
@@ -269,74 +402,94 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         </div>
 
         {/* Stepper Progress Bar */}
-        <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between sm:justify-center sm:gap-12 text-xs font-bold">
-          <div className="flex items-center gap-2 text-emerald-600">
-            <span className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[11px]">✓</span>
-            <span className="hidden sm:inline">1. LOGIN</span>
-          </div>
-
-          <ChevronRight className="w-4 h-4 text-slate-300" />
-
+        <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between sm:justify-center sm:gap-8 text-xs font-bold">
+          {/* Step 1: Login */}
           <button 
             onClick={() => setActiveStep(1)}
             className={`flex items-center gap-2 cursor-pointer ${
-              activeStep === 1 ? 'text-[#0b8442]' : activeStep > 1 ? 'text-emerald-600' : 'text-slate-400'
+              activeStep === 1 ? 'text-[#0b8442]' : user ? 'text-emerald-700' : 'text-slate-400'
             }`}
           >
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${
-              activeStep === 1 ? 'bg-[#0b8442] text-white' : activeStep > 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200'
+              user ? 'bg-emerald-100 text-emerald-700 font-bold' : activeStep === 1 ? 'bg-[#0b8442] text-white' : 'bg-slate-200'
             }`}>
-              {activeStep > 1 ? '✓' : '2'}
+              {user ? '✓' : '1'}
             </span>
-            <span>DELIVERY ADDRESS</span>
+            <span className="hidden sm:inline">1. LOGIN</span>
           </button>
 
           <ChevronRight className="w-4 h-4 text-slate-300" />
 
+          {/* Step 2: Address */}
           <button 
             onClick={() => {
-              if (!selectedAddress) {
-                alert('Please enter and confirm your delivery address before proceeding to Order Summary.');
+              if (!user) {
+                alert('Please login first to manage address.');
                 setActiveStep(1);
-                setShowNewAddressForm(true);
                 return;
               }
-              if (activeStep >= 2) setActiveStep(2);
+              setActiveStep(2);
             }}
             className={`flex items-center gap-2 cursor-pointer ${
-              activeStep === 2 ? 'text-[#0b8442]' : activeStep > 2 ? 'text-emerald-600' : 'text-slate-400'
+              activeStep === 2 ? 'text-[#0b8442]' : activeStep > 2 ? 'text-emerald-700' : 'text-slate-400'
             }`}
           >
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${
-              activeStep === 2 ? 'bg-[#0b8442] text-white' : activeStep > 2 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200'
+              activeStep === 2 ? 'bg-[#0b8442] text-white' : activeStep > 2 ? 'bg-emerald-100 text-emerald-700 font-bold' : 'bg-slate-200'
             }`}>
-              {activeStep > 2 ? '✓' : '3'}
+              {activeStep > 2 ? '✓' : '2'}
             </span>
-            <span>ORDER SUMMARY</span>
+            <span>2. DELIVERY ADDRESS</span>
           </button>
 
           <ChevronRight className="w-4 h-4 text-slate-300" />
 
+          {/* Step 3: Order Summary */}
           <button 
             onClick={() => {
               if (!selectedAddress) {
-                alert('Please enter and confirm your delivery address before proceeding to Payment.');
-                setActiveStep(1);
+                alert('Please enter and confirm your delivery address before proceeding.');
+                setActiveStep(2);
                 setShowNewAddressForm(true);
                 return;
               }
               if (activeStep >= 3) setActiveStep(3);
             }}
             className={`flex items-center gap-2 cursor-pointer ${
-              activeStep === 3 ? 'text-[#0b8442]' : 'text-slate-400'
+              activeStep === 3 ? 'text-[#0b8442]' : activeStep > 3 ? 'text-emerald-700' : 'text-slate-400'
             }`}
           >
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${
-              activeStep === 3 ? 'bg-[#0b8442] text-white' : 'bg-slate-200'
+              activeStep === 3 ? 'bg-[#0b8442] text-white' : activeStep > 3 ? 'bg-emerald-100 text-emerald-700 font-bold' : 'bg-slate-200'
+            }`}>
+              {activeStep > 3 ? '✓' : '3'}
+            </span>
+            <span className="hidden sm:inline">3. ORDER SUMMARY</span>
+          </button>
+
+          <ChevronRight className="w-4 h-4 text-slate-300" />
+
+          {/* Step 4: UPI Payment */}
+          <button 
+            onClick={() => {
+              if (!selectedAddress) {
+                alert('Please add your delivery address before proceeding to Payment.');
+                setActiveStep(2);
+                setShowNewAddressForm(true);
+                return;
+              }
+              setActiveStep(4);
+            }}
+            className={`flex items-center gap-2 cursor-pointer ${
+              activeStep === 4 ? 'text-[#0b8442]' : 'text-slate-400'
+            }`}
+          >
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${
+              activeStep === 4 ? 'bg-[#0b8442] text-white' : 'bg-slate-200'
             }`}>
               4
             </span>
-            <span>PAYMENT OPTIONS</span>
+            <span>4. UPI PAYMENT</span>
           </button>
         </div>
 
@@ -346,118 +499,255 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* Left Checkout Steps (8 cols) */}
           <div className="md:col-span-8 space-y-4">
             
-            {/* Step 1: Login status (Always compact & confirmed) */}
-            <div className="bg-white p-3.5 rounded border border-slate-200 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 font-bold flex items-center justify-center">1</span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-700">CUSTOMER</span>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            {/* Step 1: Login Status / Active Login Form */}
+            <div className={`bg-white rounded border transition-all ${
+              activeStep === 1 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
+            }`}>
+              {user ? (
+                /* Compact Logged-in State */
+                <div className="p-3.5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center">1</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-700">LOGIN / ACCOUNT</span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      </div>
+                      <p className="text-slate-500 text-[11px]">
+                        {user.displayName || 'Customer'} ({user.phone || user.email || 'Logged in'})
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-slate-500 text-[11px]">
-                    {user?.displayName || 'Customer'} ({user?.phone || '+91 Mobile'})
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">VERIFIED</span>
+                    <button
+                      onClick={() => {
+                        logout();
+                        setActiveStep(1);
+                      }}
+                      className="text-xs text-slate-500 hover:text-red-600 font-bold ml-2 underline cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <span className="text-[11px] text-emerald-600 font-bold">VERIFIED</span>
+              ) : (
+                /* Unauthenticated Step 1: Enter Mobile & OTP */
+                <div className="p-4 space-y-4 text-xs">
+                  <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
+                    <span className="w-5 h-5 rounded-full bg-[#0b8442] text-white font-bold flex items-center justify-center text-xs">1</span>
+                    <h3 className="font-bold text-sm text-slate-800 uppercase tracking-wide">
+                      LOGIN OR SIGNUP TO PROCEED
+                    </h3>
+                  </div>
+
+                  <p className="text-slate-600 text-xs">
+                    Please enter your mobile number. We will send an SMS OTP to verify your account.
+                  </p>
+
+                  {loginError && (
+                    <div className="p-2.5 bg-red-50 text-red-700 border border-red-200 rounded font-semibold text-xs">
+                      {loginError}
+                    </div>
+                  )}
+
+                  {loginSuccessMsg && (
+                    <div className="p-2.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-semibold text-xs flex items-center gap-1.5">
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>{loginSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {!otpSent ? (
+                    <form onSubmit={handleSendLoginOtp} className="space-y-3 max-w-sm">
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1">Enter 10-Digit Mobile Number *</label>
+                        <div className="flex">
+                          <span className="inline-flex items-center px-3 bg-slate-100 border border-r-0 border-slate-300 rounded-l text-slate-600 font-bold">
+                            +91
+                          </span>
+                          <input
+                            type="tel"
+                            maxLength={10}
+                            required
+                            placeholder="e.g. 9876543210"
+                            value={loginPhone}
+                            onChange={(e) => setLoginPhone(e.target.value.replace(/\D/g, ''))}
+                            className="flex-1 p-2.5 border border-slate-300 rounded-r bg-white text-slate-900 focus:border-[#0b8442] outline-none font-medium"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1">Your Name (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Sahina Shahid"
+                          value={loginName}
+                          onChange={(e) => setLoginName(e.target.value)}
+                          className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                        />
+                      </div>
+
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="submit"
+                          disabled={loginLoading}
+                          className="bg-[#0b8442] hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded text-xs transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                        >
+                          {loginLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          <span>GET OTP & CONTINUE</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLoginPhone('9876543210');
+                            setLoginName('Sahina Shahid');
+                          }}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded text-xs cursor-pointer"
+                        >
+                          Use Demo Mobile
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyLoginOtp} className="space-y-3 max-w-sm animate-in fade-in duration-150">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-slate-700 font-bold">Enter 6-Digit OTP *</label>
+                          <button
+                            type="button"
+                            onClick={() => setLoginOtp('123456')}
+                            className="text-[11px] text-[#0b8442] font-bold hover:underline cursor-pointer"
+                          >
+                            Auto-fill OTP
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          required
+                          placeholder="123456"
+                          value={loginOtp}
+                          onChange={(e) => setLoginOtp(e.target.value.replace(/\D/g, ''))}
+                          className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 font-mono text-center tracking-widest text-lg font-bold focus:border-[#0b8442] outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={loginLoading}
+                          className="bg-[#0b8442] hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded text-xs transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                        >
+                          {loginLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          <span>VERIFY & CONTINUE</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOtpSent(false)}
+                          className="text-slate-500 font-semibold text-xs hover:text-slate-700 cursor-pointer underline px-2"
+                        >
+                          Change Number
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Step 2: Delivery Address */}
             <div className={`bg-white rounded border transition-all ${
-              activeStep === 1 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
+              activeStep === 2 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
             }`}>
               <div 
-                onClick={() => setActiveStep(1)}
+                onClick={() => {
+                  if (!user) {
+                    setActiveStep(1);
+                    return;
+                  }
+                  setActiveStep(2);
+                }}
                 className="p-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">
                   <span className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-xs ${
-                    activeStep === 1 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
+                    activeStep === 2 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
                   }`}>2</span>
                   <span className="font-bold text-xs sm:text-sm text-slate-800 uppercase tracking-wide">
                     Delivery Address
                   </span>
                 </div>
-                {activeStep !== 1 && (
+                {activeStep !== 2 && (
                   <button className="text-xs text-[#0b8442] font-bold cursor-pointer">
                     {selectedAddress ? 'CHANGE' : 'ADD ADDRESS'}
                   </button>
                 )}
               </div>
 
-              {activeStep === 1 ? (
+              {activeStep === 2 ? (
                 <div className="p-4 space-y-4">
-                  {/* Warning banner when no address exists */}
+                  {/* Warning banner when NO address is saved - Requirement 2 */}
                   {addresses.length === 0 && (
                     <div className="bg-amber-50 border border-amber-300 rounded-lg p-3.5 flex items-start gap-3 text-amber-900 shadow-xs">
                       <MapPin className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                       <div>
                         <h4 className="font-bold text-xs sm:text-sm flex items-center gap-1.5">
-                          <span>Delivery Address Required</span>
+                          <span>No Saved Address Found</span>
                           <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded font-black uppercase">Action Needed</span>
                         </h4>
                         <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                          You do not have any delivery address saved. Please provide your shipping address below so we can deliver your order to your door.
+                          You do not have any saved delivery address. Please enter your complete shipping address below to deliver your order.
                         </p>
                       </div>
                     </div>
                   )}
 
-                  {/* Address Selection Radio List */}
+                  {/* Saved Address Radio List - Only shown if user actually has saved addresses */}
                   {addresses.length > 0 && (
                     <div className="space-y-3">
                       {addresses.map((addr) => (
                         <label 
                           key={addr.id}
-                          id={`addr-option-${addr.id}`}
-                          className={`block p-3.5 rounded border cursor-pointer transition-all ${
+                          className={`block p-3.5 rounded border transition-all cursor-pointer ${
                             selectedAddressId === addr.id
-                              ? 'border-[#0b8442] bg-emerald-50/40'
+                              ? 'border-[#0b8442] bg-emerald-50/30 ring-1 ring-emerald-500'
                               : 'border-slate-200 hover:border-slate-300'
                           }`}
                         >
                           <div className="flex items-start gap-3">
                             <input
                               type="radio"
-                              name="delivery-address"
+                              name="selected-address"
                               checked={selectedAddressId === addr.id}
                               onChange={() => setSelectedAddressId(addr.id)}
-                              className="mt-1 text-[#0b8442] focus:ring-emerald-500"
+                              className="mt-1 text-[#0b8442] focus:ring-[#0b8442]"
                             />
-                            <div className="flex-1 text-xs space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-slate-900">{addr.name}</span>
-                                <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
-                                  {addr.type === 'HOME' ? <Home className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
+                            <div className="flex-1 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-800 text-sm">{addr.name}</span>
+                                <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                                  {addr.type === 'HOME' ? <Home className="w-3 h-3 text-emerald-600" /> : <Briefcase className="w-3 h-3 text-blue-600" />}
                                   {addr.type}
                                 </span>
-                                <span className="font-bold text-slate-800">{addr.phone}</span>
-                                {addr.isDefault && (
-                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
-                                    Default
-                                  </span>
-                                )}
+                                <span className="text-slate-500 font-medium ml-auto">{addr.phone}</span>
                               </div>
-                              <p className="text-slate-600 leading-relaxed">
-                                {addr.address}, {addr.locality}, {addr.city}, {addr.state} - <span className="font-bold">{addr.pincode}</span>
+                              <p className="text-slate-600 mt-1.5 leading-relaxed">
+                                {addr.address}, {addr.locality}, {addr.city}, {addr.state} - <span className="font-bold text-slate-800">{addr.pincode}</span>
                               </p>
                               {addr.landmark && (
-                                <p className="text-slate-400 text-[11px]">Landmark: {addr.landmark}</p>
+                                <p className="text-slate-400 text-[11px] mt-0.5">Landmark: {addr.landmark}</p>
                               )}
 
                               {selectedAddressId === addr.id && (
-                                <div className="pt-2">
+                                <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center">
                                   <button
-                                    id="deliver-here-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setActiveStep(2);
-                                    }}
-                                    className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2 px-5 rounded text-xs transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+                                    type="button"
+                                    onClick={() => setActiveStep(3)}
+                                    className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2 px-5 rounded text-xs transition-colors shadow-xs cursor-pointer"
                                   >
-                                    <Check className="w-3.5 h-3.5 stroke-[3]" />
-                                    <span>DELIVER HERE</span>
+                                    DELIVER HERE
                                   </button>
                                 </div>
                               )}
@@ -485,14 +775,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           <MapPin className="w-4 h-4 text-[#0b8442]" />
                           <span>{addresses.length === 0 ? 'Enter Delivery Address' : 'Add New Delivery Address'}</span>
                         </h4>
-                        <button
-                          type="button"
-                          onClick={handleFillDemoAddress}
-                          className="bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <Sparkles className="w-3 h-3 text-amber-700" />
-                          <span>Autofill Sample Address</span>
-                        </button>
+                        <span className="text-[11px] text-slate-500 font-medium">All fields marked * are required</span>
                       </div>
 
                       {addrError && (
@@ -507,66 +790,81 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           <input
                             type="text"
                             required
-                            placeholder="Full Name *"
+                            placeholder="Recipient's Name"
                             value={newAddr.name}
                             onChange={(e) => setNewAddr({ ...newAddr, name: e.target.value })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           />
                         </div>
                         <div>
                           <label className="block text-slate-700 font-bold mb-1">10-Digit Mobile Number *</label>
                           <div className="flex">
-                            <span className="inline-flex items-center px-2 bg-slate-100 border border-r-0 border-slate-300 rounded-l text-slate-600 font-semibold text-xs">
+                            <span className="inline-flex items-center px-2.5 bg-slate-100 border border-r-0 border-slate-300 rounded-l text-slate-600 font-semibold text-xs">
                               +91
                             </span>
                             <input
                               type="tel"
                               required
                               maxLength={10}
-                              placeholder="Mobile Number *"
+                              placeholder="10-digit mobile"
                               value={newAddr.phone}
                               onChange={(e) => setNewAddr({ ...newAddr, phone: e.target.value.replace(/\D/g, '') })}
-                              className="w-full p-2 border border-slate-300 rounded-r bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                              className="w-full p-2.5 border border-slate-300 rounded-r bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                             />
                           </div>
                         </div>
                       </div>
 
+                      {/* Requirement 3: Pincode Auto-fill City & State */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-700 font-bold mb-1">6-Digit Pincode *</label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-slate-700 font-bold">6-Digit Pincode *</label>
+                            {isLookingUpPincode && (
+                              <span className="text-[10px] text-[#0b8442] font-semibold flex items-center gap-1">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Fetching details...
+                              </span>
+                            )}
+                          </div>
                           <input
                             type="text"
                             required
                             maxLength={6}
-                            placeholder="Pincode *"
+                            placeholder="e.g. 560001 or 110001"
                             value={newAddr.pincode}
                             onChange={(e) => setNewAddr({ ...newAddr, pincode: e.target.value.replace(/\D/g, '') })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           />
+                          {pincodeSuccessMsg && (
+                            <p className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              {pincodeSuccessMsg}
+                            </p>
+                          )}
                         </div>
                         <div>
-                          <label className="block text-slate-700 font-bold mb-1">Locality / Area *</label>
+                          <label className="block text-slate-700 font-bold mb-1">Locality / Colony / Area *</label>
                           <input
                             type="text"
                             required
-                            placeholder="Locality / Area *"
+                            placeholder="e.g. Colony, Area or Street"
                             value={newAddr.locality}
                             onChange={(e) => setNewAddr({ ...newAddr, locality: e.target.value })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Flat / House No., Building Name, Street Address *</label>
+                        <label className="block text-slate-700 font-bold mb-1">Flat, House No., Building Name, Street Address *</label>
                         <textarea
                           required
-                          placeholder="Flat / House No., Building Name, Street Address *"
+                          placeholder="e.g. Flat 302, Green Valley Apartments"
                           rows={2}
                           value={newAddr.address}
                           onChange={(e) => setNewAddr({ ...newAddr, address: e.target.value })}
-                          className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                          className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                         />
                       </div>
 
@@ -576,10 +874,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           <input
                             type="text"
                             required
-                            placeholder="City *"
+                            placeholder="City or District"
                             value={newAddr.city}
                             onChange={(e) => setNewAddr({ ...newAddr, city: e.target.value })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           />
                         </div>
                         <div>
@@ -587,8 +885,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           <select
                             value={newAddr.state}
                             onChange={(e) => setNewAddr({ ...newAddr, state: e.target.value })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           >
+                            <option value="">-- Select State --</option>
                             {INDIAN_STATES.map((st) => (
                               <option key={st} value={st}>{st}</option>
                             ))}
@@ -601,7 +900,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                             placeholder="e.g. Near Metro Station"
                             value={newAddr.landmark}
                             onChange={(e) => setNewAddr({ ...newAddr, landmark: e.target.value })}
-                            className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
+                            className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                           />
                         </div>
                       </div>
@@ -633,7 +932,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       <div className="flex gap-2 pt-2">
                         <button
                           type="submit"
-                          className="bg-[#0b8442] text-white font-bold py-2.5 px-5 rounded text-xs hover:bg-emerald-700 cursor-pointer shadow-xs transition-colors"
+                          className="bg-[#0b8442] text-white font-bold py-2.5 px-6 rounded text-xs hover:bg-emerald-700 cursor-pointer shadow-xs transition-colors"
                         >
                           SAVE AND DELIVER HERE
                         </button>
@@ -671,26 +970,33 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {/* Step 3: Order Summary */}
             <div className={`bg-white rounded border transition-all ${
-              activeStep === 2 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
+              activeStep === 3 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
             }`}>
               <div 
-                onClick={() => activeStep > 2 && setActiveStep(2)}
+                onClick={() => {
+                  if (!selectedAddress) {
+                    alert('Please enter and confirm your delivery address.');
+                    setActiveStep(2);
+                    return;
+                  }
+                  setActiveStep(3);
+                }}
                 className="p-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">
                   <span className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-xs ${
-                    activeStep === 2 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
+                    activeStep === 3 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
                   }`}>3</span>
                   <span className="font-bold text-xs sm:text-sm text-slate-800 uppercase tracking-wide">
                     Order Summary ({cartItems.length} items)
                   </span>
                 </div>
-                {activeStep > 2 && (
+                {activeStep > 3 && (
                   <button className="text-xs text-[#0b8442] font-bold cursor-pointer">CHANGE</button>
                 )}
               </div>
 
-              {activeStep === 2 ? (
+              {activeStep === 3 ? (
                 <div className="p-4 space-y-4">
                   <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                     {cartItems.map(({ product, quantity }) => (
@@ -711,44 +1017,44 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                   <div className="flex items-center justify-between pt-2">
                     <p className="text-xs text-slate-500">
-                      Order confirmation email will be sent to <span className="font-bold text-slate-800">sahinashahid931@gmail.com</span>
+                      Delivery by <span className="font-bold text-slate-800">{getEstimatedDeliveryDate(true)}</span>
                     </p>
                     <button
                       id="order-summary-continue-btn"
-                      onClick={() => setActiveStep(3)}
+                      onClick={() => setActiveStep(4)}
                       className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-xs cursor-pointer"
                     >
-                      CONTINUE TO PAYMENT
+                      CONTINUE TO UPI PAYMENT
                     </button>
                   </div>
                 </div>
-              ) : activeStep > 2 ? (
+              ) : activeStep > 3 ? (
                 <div className="px-4 py-2 text-xs text-slate-600">
                   {cartItems.length} item(s) selected for delivery
                 </div>
               ) : null}
             </div>
 
-            {/* Step 4: Payment Options (The Secure Payment Integration) */}
+            {/* Step 4: UPI ONLY Payment Options (Requirement 4) */}
             <div className={`bg-white rounded border transition-all ${
-              activeStep === 3 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
+              activeStep === 4 ? 'border-[#0b8442] shadow-md ring-1 ring-emerald-100' : 'border-slate-200'
             }`}>
               <div className="p-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <span className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-xs ${
-                    activeStep === 3 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
+                    activeStep === 4 ? 'bg-[#0b8442] text-white' : 'bg-slate-200 text-slate-600'
                   }`}>4</span>
                   <span className="font-bold text-xs sm:text-sm text-slate-800 uppercase tracking-wide">
-                    Payment Options (100% Safe & Secure)
+                    UPI Payment Options (100% Safe & Zero Fee)
                   </span>
                 </div>
-                <div className="flex items-center gap-1 text-[11px] text-[#388e3c] font-bold">
+                <div className="flex items-center gap-1 text-[11px] text-[#0b8442] font-bold">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>RBI Compliant</span>
+                  <span>NPCI Unified Payments</span>
                 </div>
               </div>
 
-              {activeStep === 3 && (
+              {activeStep === 4 && (
                 <div className="p-4 space-y-4">
                   {/* SuperCoins Redemption Checkbox */}
                   {superCoins > 0 && (
@@ -762,349 +1068,214 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         />
                         <div>
                           <span className="font-bold text-amber-900">Pay using SuperCoins</span>
-                          <p className="text-[11px] text-amber-700">Use {Math.min(superCoins, 200)} SuperCoins to get ₹{Math.min(superCoins, 200)} discount</p>
+                          <p className="text-[11px] text-amber-700">Use {Math.min(superCoins, 200)} SuperCoins to save ₹{Math.min(superCoins, 200)}</p>
                         </div>
                       </div>
                       <span className="font-black text-amber-800">Balance: {superCoins}</span>
                     </label>
                   )}
 
-                  {/* Payment Methods Accordion */}
-                  <div className="space-y-3">
+                  {/* UPI Banner */}
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 text-[#0b8442]" />
+                      <div>
+                        <span className="font-bold text-slate-800">Unified Payments Interface (UPI)</span>
+                        <p className="text-[11px] text-slate-600">Select any UPI App or enter your Mobile / UPI ID below</p>
+                      </div>
+                    </div>
+                    <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">FAST & SECURE</span>
+                  </div>
+
+                  {/* UPI Options Selection Grid - Requirement 4 */}
+                  <div className="space-y-2 text-xs">
+                    <label className="font-bold text-slate-700 block">Select your UPI Option:</label>
                     
-                    {/* 1. UPI */}
-                    <div className={`border rounded p-3 transition-all ${
-                      selectedPaymentMethod === 'UPI' ? 'border-[#0b8442] bg-emerald-50/20' : 'border-slate-200'
-                    }`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="payment-method"
-                          checked={selectedPaymentMethod === 'UPI'}
-                          onChange={() => setSelectedPaymentMethod('UPI')}
-                          className="text-[#0b8442]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <Smartphone className="w-4 h-4 text-[#0b8442]" />
-                          <span className="text-xs font-bold text-slate-800">UPI (Instant & Zero Fee)</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {/* Google Pay */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectUpiApp('GPAY')}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          selectedUpiOption === 'GPAY'
+                            ? 'border-[#0b8442] bg-emerald-50/60 ring-2 ring-[#0b8442]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold text-slate-800">Google Pay</span>
+                          <div className={`w-3.5 h-3.5 rounded-full border ${selectedUpiOption === 'GPAY' ? 'border-[#0b8442] bg-[#0b8442]' : 'border-slate-300'}`} />
                         </div>
-                      </label>
+                        <span className="text-[10px] text-slate-500 mt-1">GPay App</span>
+                      </button>
 
-                      {selectedPaymentMethod === 'UPI' && (
-                        <div className="mt-3 pl-6 space-y-3 text-xs">
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setUpiOption('app')}
-                              className={`px-3 py-1.5 rounded font-bold transition-colors cursor-pointer ${
-                                upiOption === 'app' ? 'bg-[#0b8442] text-white' : 'bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              Popular UPI Apps
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setUpiOption('id')}
-                              className={`px-3 py-1.5 rounded font-bold transition-colors cursor-pointer ${
-                                upiOption === 'id' ? 'bg-[#0b8442] text-white' : 'bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              Your UPI ID / VPA
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setUpiOption('qr')}
-                              className={`px-3 py-1.5 rounded font-bold transition-colors cursor-pointer ${
-                                upiOption === 'qr' ? 'bg-[#0b8442] text-white' : 'bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              QR Code
-                            </button>
-                          </div>
+                      {/* PhonePe */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectUpiApp('PHONEPE')}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          selectedUpiOption === 'PHONEPE'
+                            ? 'border-[#0b8442] bg-emerald-50/60 ring-2 ring-[#0b8442]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold text-slate-800">PhonePe</span>
+                          <div className={`w-3.5 h-3.5 rounded-full border ${selectedUpiOption === 'PHONEPE' ? 'border-[#0b8442] bg-[#0b8442]' : 'border-slate-300'}`} />
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-1">UPI & Wallet</span>
+                      </button>
 
-                          {upiOption === 'app' && (
-                            <div className="space-y-2 pt-1">
-                              {['Google Pay', 'PhonePe', 'Paytm', 'BHIM UPI'].map((app) => (
-                                <label key={app} className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-100">
-                                  <input
-                                    type="radio"
-                                    name="upi-app"
-                                    checked={upiApp === app}
-                                    onChange={() => setUpiApp(app)}
-                                  />
-                                  <span className="font-semibold text-slate-800">{app}</span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
+                      {/* Paytm */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectUpiApp('PAYTM')}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          selectedUpiOption === 'PAYTM'
+                            ? 'border-[#0b8442] bg-emerald-50/60 ring-2 ring-[#0b8442]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold text-slate-800">Paytm</span>
+                          <div className={`w-3.5 h-3.5 rounded-full border ${selectedUpiOption === 'PAYTM' ? 'border-[#0b8442] bg-[#0b8442]' : 'border-slate-300'}`} />
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-1">Paytm UPI</span>
+                      </button>
 
-                          {upiOption === 'id' && (
-                            <div className="flex gap-2 max-w-sm pt-1">
-                              <input
-                                type="text"
-                                placeholder="e.g. mobile@okaxis"
-                                value={upiId}
-                                onChange={(e) => setUpiId(e.target.value)}
-                                className="flex-1 p-2 border border-slate-300 rounded bg-white text-slate-900"
-                              />
-                            </div>
-                          )}
+                      {/* BHIM / Any UPI */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectUpiApp('BHIM')}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          selectedUpiOption === 'BHIM'
+                            ? 'border-[#0b8442] bg-emerald-50/60 ring-2 ring-[#0b8442]'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold text-slate-800">BHIM / Other</span>
+                          <div className={`w-3.5 h-3.5 rounded-full border ${selectedUpiOption === 'BHIM' ? 'border-[#0b8442] bg-[#0b8442]' : 'border-slate-300'}`} />
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-1">Any UPI App</span>
+                      </button>
+                    </div>
+                  </div>
 
-                          {upiOption === 'qr' && (
-                            <div className="p-4 bg-white border border-slate-200 rounded max-w-xs text-center space-y-2">
-                              <div className="w-32 h-32 mx-auto bg-slate-100 border border-slate-300 flex items-center justify-center rounded">
-                                <QrCode className="w-24 h-24 text-slate-800" />
-                              </div>
-                              <p className="text-[11px] text-slate-500">Scan using any UPI app on your phone</p>
-                            </div>
-                          )}
-
+                  {/* Verification Input Box - Triggered for ANY selected option */}
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3 text-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-bold text-slate-800">
+                          Enter Mobile Number or UPI ID / VPA *
+                        </label>
+                        {user?.phone && (
                           <button
-                            id="pay-via-upi-btn"
-                            onClick={handleTriggerPayment}
-                            disabled={isProcessing}
-                            className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-sm flex items-center gap-2 mt-2 cursor-pointer"
+                            type="button"
+                            onClick={() => {
+                              setUpiIdentifier(user.phone!.replace(/\D/g, '').slice(-10));
+                              setIsUpiVerified(false);
+                            }}
+                            className="text-[11px] text-[#0b8442] font-semibold hover:underline cursor-pointer"
                           >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>PAY {formatPrice(finalAmount)}</span>
+                            Use My Mobile ({user.phone})
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={upiIdentifier}
+                          onChange={(e) => {
+                            setUpiIdentifier(e.target.value);
+                            setIsUpiVerified(false);
+                            setVerifiedUpiDetails(null);
+                            setUpiError(null);
+                          }}
+                          placeholder="e.g. 9876543210 or yourname@okhdfcbank"
+                          className="flex-1 p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none font-medium"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyUpi}
+                          disabled={isVerifyingUpi}
+                          className="bg-[#0b8442] hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          {isVerifyingUpi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                          <span>{isVerifyingUpi ? 'Verifying...' : 'VERIFY'}</span>
+                        </button>
+                      </div>
+
+                      {/* Quick handle tags to append */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        <span className="text-[10px] text-slate-400 font-semibold">Quick Suffix:</span>
+                        {['@okhdfcbank', '@okaxis', '@oksbi', '@paytm', '@ybl', '@upi'].map((suffix) => (
+                          <button
+                            key={suffix}
+                            type="button"
+                            onClick={() => {
+                              const base = upiIdentifier.includes('@') ? upiIdentifier.split('@')[0] : upiIdentifier;
+                              setUpiIdentifier((base || '9876543210') + suffix);
+                              setIsUpiVerified(false);
+                            }}
+                            className="text-[10px] bg-white border border-slate-200 hover:border-[#0b8442] hover:text-[#0b8442] px-2 py-0.5 rounded text-slate-600 transition-colors cursor-pointer"
+                          >
+                            {suffix}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    {/* 2. Credit / Debit / ATM Card */}
-                    <div className={`border rounded p-3 transition-all ${
-                      selectedPaymentMethod === 'CARD' ? 'border-[#0b8442] bg-emerald-50/20' : 'border-slate-200'
-                    }`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="payment-method"
-                          checked={selectedPaymentMethod === 'CARD'}
-                          onChange={() => setSelectedPaymentMethod('CARD')}
-                          className="text-[#0b8442]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <CreditCard className="w-4 h-4 text-[#0b8442]" />
-                          <span className="text-xs font-bold text-slate-800">Credit / Debit / ATM Card</span>
+                    {upiError && (
+                      <div className="p-2 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-semibold">
+                        {upiError}
+                      </div>
+                    )}
+
+                    {/* Verified Card display */}
+                    {isUpiVerified && verifiedUpiDetails && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-lg text-emerald-900 space-y-1 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-2 font-bold text-xs text-emerald-800">
+                          <CheckCircle className="w-4 h-4 text-emerald-600" />
+                          <span>UPI Verified with National Payments Corporation (NPCI)</span>
                         </div>
-                      </label>
-
-                      {selectedPaymentMethod === 'CARD' && (
-                        <div className="mt-3 pl-6 space-y-3 text-xs max-w-md">
-                          <div className="space-y-1">
-                            <label className="font-semibold text-slate-700">Card Number</label>
-                            <input
-                              id="card-number-input"
-                              type="text"
-                              maxLength={19}
-                              value={cardNumber}
-                              onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
-                              placeholder="4532 8901 2345 6789"
-                              className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 font-mono"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <label className="font-semibold text-slate-700">Valid Thru</label>
-                              <input
-                                id="card-expiry-input"
-                                type="text"
-                                maxLength={5}
-                                value={cardExpiry}
-                                onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
-                                placeholder="MM/YY"
-                                className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 font-mono"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="font-semibold text-slate-700">CVV</label>
-                              <input
-                                id="card-cvv-input"
-                                type="password"
-                                maxLength={4}
-                                value={cardCvv}
-                                onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, ''))}
-                                placeholder="123"
-                                className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900 font-mono"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="font-semibold text-slate-700">Name on Card</label>
-                            <input
-                              id="card-holder-input"
-                              type="text"
-                              value={cardName}
-                              onChange={(e) => setCardName(e.target.value)}
-                              placeholder="Cardholder Name"
-                              className="w-full p-2 border border-slate-300 rounded bg-white text-slate-900"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-500">
-                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                            <span>Your card details are protected by bank-level 256-bit encryption</span>
-                          </div>
-
-                          <button
-                            id="pay-via-card-btn"
-                            onClick={handleTriggerPayment}
-                            disabled={isProcessing}
-                            className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-sm flex items-center gap-2 mt-2 cursor-pointer"
-                          >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>PAY {formatPrice(finalAmount)}</span>
-                          </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-emerald-800 pt-1">
+                          <p><span className="font-semibold">Account Holder:</span> {verifiedUpiDetails.accountHolder}</p>
+                          <p><span className="font-semibold">UPI ID:</span> {verifiedUpiDetails.identifier}</p>
+                          <p className="sm:col-span-2 text-emerald-700 font-medium">Status: Ready for 1-click authorization</p>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                  </div>
 
-                    {/* 3. Net Banking */}
-                    <div className={`border rounded p-3 transition-all ${
-                      selectedPaymentMethod === 'NET_BANKING' ? 'border-[#0b8442] bg-emerald-50/20' : 'border-slate-200'
-                    }`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="payment-method"
-                          checked={selectedPaymentMethod === 'NET_BANKING'}
-                          onChange={() => setSelectedPaymentMethod('NET_BANKING')}
-                          className="text-[#0b8442]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <Building2 className="w-4 h-4 text-[#0b8442]" />
-                          <span className="text-xs font-bold text-slate-800">Net Banking</span>
-                        </div>
-                      </label>
-
-                      {selectedPaymentMethod === 'NET_BANKING' && (
-                        <div className="mt-3 pl-6 space-y-3 text-xs">
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {['HDFC Bank', 'State Bank of India', 'ICICI Bank', 'Axis Bank', 'Kotak Mahindra', 'Punjab National Bank'].map((bank) => (
-                              <button
-                                key={bank}
-                                type="button"
-                                onClick={() => setSelectedBank(bank)}
-                                className={`p-2 rounded border text-left font-semibold transition-colors cursor-pointer ${
-                                  selectedBank === bank ? 'border-[#0b8442] bg-emerald-50 text-[#0b8442]' : 'border-slate-200 hover:border-slate-300'
-                                }`}
-                              >
-                                {bank}
-                              </button>
-                            ))}
-                          </div>
-
-                          <button
-                            id="pay-via-netbanking-btn"
-                            onClick={handleTriggerPayment}
-                            disabled={isProcessing}
-                            className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-sm flex items-center gap-2 mt-2 cursor-pointer"
-                          >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>PAY {formatPrice(finalAmount)}</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4. Cash on Delivery */}
-                    <div className={`border rounded p-3 transition-all ${
-                      selectedPaymentMethod === 'COD' ? 'border-[#0b8442] bg-emerald-50/20' : 'border-slate-200'
-                    }`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="payment-method"
-                          checked={selectedPaymentMethod === 'COD'}
-                          onChange={() => setSelectedPaymentMethod('COD')}
-                          className="text-[#0b8442]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <Banknote className="w-4 h-4 text-emerald-600" />
-                          <span className="text-xs font-bold text-slate-800">Cash on Delivery</span>
-                        </div>
-                      </label>
-
-                      {selectedPaymentMethod === 'COD' && (
-                        <div className="mt-3 pl-6 space-y-3 text-xs max-w-sm">
-                          <p className="text-slate-600">
-                            Pay with cash or UPI at the doorstep when your order arrives.
-                          </p>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-bold tracking-widest text-base bg-slate-200 px-3 py-1 rounded text-slate-800 select-none">
-                              {captchaCode}
-                            </span>
-                            <input
-                              id="cod-captcha-input"
-                              type="text"
-                              maxLength={4}
-                              value={userCaptcha}
-                              onChange={(e) => setUserCaptcha(e.target.value)}
-                              placeholder="Enter numbers"
-                              className="w-32 p-2 border border-slate-300 rounded bg-white text-slate-900"
-                            />
-                          </div>
-
-                          <button
-                            id="confirm-cod-order-btn"
-                            onClick={handleTriggerPayment}
-                            disabled={isProcessing}
-                            className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-sm flex items-center gap-2 mt-2 cursor-pointer"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>CONFIRM ORDER</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 5. EMI (Easy Installments) */}
-                    <div className={`border rounded p-3 transition-all ${
-                      selectedPaymentMethod === 'EMI' ? 'border-[#0b8442] bg-emerald-50/20' : 'border-slate-200'
-                    }`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="payment-method"
-                          checked={selectedPaymentMethod === 'EMI'}
-                          onChange={() => setSelectedPaymentMethod('EMI')}
-                          className="text-[#0b8442]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <CalendarClock className="w-4 h-4 text-[#0b8442]" />
-                          <span className="text-xs font-bold text-slate-800">EMI (Easy Installments / No Cost EMI)</span>
-                        </div>
-                      </label>
-
-                      {selectedPaymentMethod === 'EMI' && (
-                        <div className="mt-3 pl-6 space-y-3 text-xs">
-                          <div className="space-y-2">
-                            <div className="p-2 border rounded border-emerald-300 bg-emerald-50 text-emerald-800 flex justify-between items-center">
-                              <span>3 Months No-Cost EMI</span>
-                              <span className="font-bold">{formatPrice(Math.round(finalAmount / 3))}/month</span>
-                            </div>
-                            <div className="p-2 border rounded border-slate-200 flex justify-between items-center">
-                              <span>6 Months Standard EMI</span>
-                              <span className="font-bold">{formatPrice(Math.round(finalAmount / 6))}/month</span>
-                            </div>
-                          </div>
-
-                          <button
-                            id="pay-via-emi-btn"
-                            onClick={handleTriggerPayment}
-                            disabled={isProcessing}
-                            className="bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-2.5 px-6 rounded text-xs transition-colors shadow-sm flex items-center gap-2 mt-2 cursor-pointer"
-                          >
-                            <Lock className="w-3.5 h-3.5" />
-                            <span>PROCEED WITH EMI</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
+                  {/* Pay button */}
+                  <div>
+                    {!isUpiVerified ? (
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={handleVerifyUpi}
+                          className="w-full sm:w-auto bg-slate-300 text-slate-600 font-bold py-3 px-8 rounded text-xs cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          <Lock className="w-4 h-4" />
+                          <span>ENTER & VERIFY MOBILE / UPI ID TO PAY {formatPrice(finalAmount)}</span>
+                        </button>
+                        <p className="text-[11px] text-slate-500">
+                          Please click the <span className="font-bold text-[#0b8442]">VERIFY</span> button above to authenticate your UPI account before placing the order.
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        id="pay-via-upi-btn"
+                        onClick={handleTriggerPayment}
+                        disabled={isProcessing}
+                        className="w-full sm:w-auto bg-[#fb641b] hover:bg-[#e6550f] text-white font-bold py-3 px-8 rounded text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer transform active:scale-98"
+                      >
+                        <Lock className="w-4 h-4" />
+                        <span>PAY {formatPrice(finalAmount)} VIA UPI</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1162,58 +1333,61 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
 
             {/* Trust Assurance Card */}
-            <div className="p-3 bg-white border border-slate-200 rounded text-xs text-slate-600 space-y-2">
+            <div className="p-3.5 bg-white border border-slate-200 rounded text-xs text-slate-600 space-y-2">
               <div className="flex items-center gap-2 text-emerald-700 font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>Safe and Secure Payments</span>
+                <span>100% Safe UPI Payments</span>
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                ApniDukaan guarantees 100% purchase protection for your shopping. Easy returns and instant customer support.
+                Transactions are authorized directly via your mobile banking app through NPCI with 256-bit encryption.
               </p>
             </div>
           </div>
 
         </div>
 
-        {/* 3D Secure / OTP Simulation Modal for Card Payments */}
-        {showOtpModal && (
+        {/* UPI MPIN Authorization Modal */}
+        {showUpiPinModal && (
           <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
             <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4 animate-in zoom-in-95 duration-150">
               <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 text-[#0b8442] flex items-center justify-center">
-                <ShieldCheck className="w-6 h-6" />
+                <Smartphone className="w-6 h-6" />
               </div>
 
               <div>
-                <h3 className="text-base font-bold text-slate-900">Verified by Visa / RuPay Secure</h3>
+                <h3 className="text-base font-bold text-slate-900">UPI Payment Authorization</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Enter the 6-digit OTP sent to your registered mobile number (+91 98*** **210)
+                  Payment request of <span className="font-bold text-slate-900">{formatPrice(finalAmount)}</span> sent to <span className="font-bold text-emerald-700">{verifiedUpiDetails?.identifier || upiIdentifier}</span>
                 </p>
               </div>
 
-              <div className="py-2">
+              <div className="py-2 space-y-2">
+                <label className="block text-xs font-bold text-slate-700">Enter 4 or 6-digit UPI MPIN</label>
                 <input
-                  id="otp-input"
-                  type="text"
+                  id="upi-pin-input"
+                  type="password"
                   maxLength={6}
-                  value={otpValue}
-                  onChange={(e) => setOtpValue(e.target.value)}
-                  className="w-48 mx-auto text-center text-xl font-mono tracking-widest font-bold p-2 border-2 border-emerald-500 rounded focus:outline-none"
+                  value={upiMpin}
+                  onChange={(e) => setUpiMpin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="••••"
+                  className="w-44 mx-auto text-center text-2xl font-mono tracking-widest font-bold p-2.5 border-2 border-emerald-500 rounded focus:outline-none"
+                  autoFocus
                 />
-                <p className="text-[11px] text-slate-400 mt-2">
-                  Auto-filled OTP for secure sandbox simulation (123456)
+                <p className="text-[11px] text-slate-400">
+                  Demo PIN: Enter any 4 or 6 numbers (e.g. 1234)
                 </p>
               </div>
 
               <div className="flex gap-2">
                 <button
-                  id="submit-otp-btn"
+                  id="submit-upi-pin-btn"
                   onClick={finalizeOrder}
-                  className="flex-1 bg-[#0b8442] hover:bg-emerald-700 text-white font-bold py-2.5 rounded text-xs transition-colors cursor-pointer"
+                  className="flex-1 bg-[#0b8442] hover:bg-emerald-700 text-white font-bold py-2.5 rounded text-xs transition-colors cursor-pointer shadow-xs"
                 >
-                  VERIFY & SUBMIT
+                  CONFIRM & PAY
                 </button>
                 <button
-                  onClick={() => setShowOtpModal(false)}
+                  onClick={() => setShowUpiPinModal(false)}
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded text-xs transition-colors cursor-pointer"
                 >
                   CANCEL
@@ -1229,12 +1403,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="bg-white rounded-lg p-8 max-w-sm w-full text-center space-y-4 shadow-2xl">
               <div className="w-14 h-14 mx-auto rounded-full border-4 border-emerald-200 border-t-[#0b8442] animate-spin"></div>
               <div>
-                <h3 className="text-base font-bold text-slate-800">Processing Secure Payment...</h3>
-                <p className="text-xs text-slate-500 mt-1">Contacting your payment gateway. Please do not refresh or press back.</p>
+                <h3 className="text-base font-bold text-slate-800">Processing UPI Payment...</h3>
+                <p className="text-xs text-slate-500 mt-1">Authorizing with your bank via NPCI. Please do not refresh.</p>
               </div>
               <div className="inline-flex items-center gap-1.5 text-xs text-emerald-600 font-semibold">
                 <Lock className="w-3.5 h-3.5" />
-                <span>256-Bit SSL Encrypted Connection</span>
+                <span>Encrypted & Bank Approved</span>
               </div>
             </div>
           </div>

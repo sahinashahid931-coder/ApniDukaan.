@@ -49,15 +49,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem('apnidukaan_active_user');
-      return saved ? JSON.parse(saved) : DEMO_CUSTOMER;
+      return saved ? JSON.parse(saved) : null;
     } catch {
-      return DEMO_CUSTOMER;
+      return null;
     }
   });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // In-memory active OTP storage mapped to phone numbers
   const [activeOtps, setActiveOtps] = useState<Record<string, { code: string; expiresAt: number }>>({});
+
+  // Check whether user is already logged in with Firebase Auth or saved session
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        try {
+          const profile = await getUserProfile(fbUser.uid);
+          if (profile) {
+            setUser(profile);
+          }
+        } catch (e) {
+          console.warn('Error fetching firebase profile:', e);
+        }
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Synchronize active profile with local storage
   useEffect(() => {

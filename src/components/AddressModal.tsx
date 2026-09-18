@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Address } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -9,10 +9,12 @@ import {
   CheckCircle2, 
   Home, 
   Briefcase, 
-  Sparkles,
   Phone,
-  Building
+  Building,
+  Loader2,
+  Check
 } from 'lucide-react';
+import { INDIAN_STATES, lookupPincode } from '../utils/pincode';
 
 interface AddressModalProps {
   isOpen: boolean;
@@ -22,14 +24,6 @@ interface AddressModalProps {
   onDeleteAddress: (addressId: string) => void;
   onSetDefaultAddress: (addressId: string) => void;
 }
-
-const INDIAN_STATES = [
-  'Andhra Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 
-  'Delhi NCR', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 
-  'Jammu & Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 
-  'Maharashtra', 'Odisha', 'Punjab', 'Rajasthan', 'Tamil Nadu', 
-  'Telangana', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
-];
 
 export const AddressModal: React.FC<AddressModalProps> = ({
   isOpen,
@@ -41,38 +35,61 @@ export const AddressModal: React.FC<AddressModalProps> = ({
 }) => {
   const { user } = useAuth();
   const [showAddForm, setShowAddForm] = useState(false);
+  const [isLookingUpPincode, setIsLookingUpPincode] = useState(false);
+  const [pincodeMessage, setPincodeMessage] = useState<string | null>(null);
 
-  // Address form fields
+  // Address form fields - blank by default, no pre-filled Bengaluru/Karnataka
   const [formData, setFormData] = useState({
     name: user?.displayName || '',
     phone: user?.phone?.replace(/\D/g, '').slice(-10) || '',
     pincode: '',
     locality: '',
     address: '',
-    city: 'Bengaluru',
-    state: 'Karnataka',
+    city: '',
+    state: '',
     landmark: '',
     type: 'HOME' as 'HOME' | 'WORK'
   });
 
   const [formError, setFormError] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  // Automatic Pincode fetch when 6 digits are entered
+  useEffect(() => {
+    const cleanPin = formData.pincode.replace(/\D/g, '').trim();
+    if (cleanPin.length === 6) {
+      let isMounted = true;
+      setIsLookingUpPincode(true);
+      setPincodeMessage(null);
 
-  const handleFillDemoAddress = () => {
-    setFormData({
-      name: user?.displayName || 'Sahina Shahid',
-      phone: user?.phone?.replace(/\D/g, '').slice(-10) || '9876543210',
-      pincode: '560001',
-      locality: 'MG Road, Ashok Nagar',
-      address: '#42, Prestige Meridian Towers, 5th Floor',
-      city: 'Bengaluru',
-      state: 'Karnataka',
-      landmark: 'Near Trinity Metro Station',
-      type: 'HOME'
-    });
-    setFormError(null);
-  };
+      lookupPincode(cleanPin)
+        .then((res) => {
+          if (!isMounted) return;
+          if (res.success) {
+            setFormData((prev) => ({
+              ...prev,
+              city: res.city,
+              state: res.state,
+              locality: (!prev.locality && res.localities && res.localities.length > 0) ? res.localities[0] : prev.locality
+            }));
+            setPincodeMessage(`Auto-filled: ${res.city}, ${res.state}`);
+            setFormError(null);
+          } else {
+            setPincodeMessage(null);
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsLookingUpPincode(false);
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setPincodeMessage(null);
+    }
+  }, [formData.pincode]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,16 +109,24 @@ export const AddressModal: React.FC<AddressModalProps> = ({
       setFormError('Please enter flat/house no. and building details');
       return;
     }
+    if (!formData.city.trim()) {
+      setFormError('Please enter your City / District');
+      return;
+    }
+    if (!formData.state.trim()) {
+      setFormError('Please select your State');
+      return;
+    }
 
     const newAddress: Address = {
       id: `addr-${Date.now()}`,
       name: formData.name.trim(),
       phone: formData.phone.trim(),
       pincode: formData.pincode.trim(),
-      locality: formData.locality.trim() || 'City Center',
+      locality: formData.locality.trim() || 'Locality',
       address: formData.address.trim(),
-      city: formData.city.trim() || 'Bengaluru',
-      state: formData.state.trim() || 'Karnataka',
+      city: formData.city.trim(),
+      state: formData.state.trim(),
       landmark: formData.landmark?.trim() || undefined,
       type: formData.type,
       isDefault: addresses.length === 0
@@ -110,14 +135,15 @@ export const AddressModal: React.FC<AddressModalProps> = ({
     onSaveAddress(newAddress);
     setShowAddForm(false);
     setFormError(null);
+    setPincodeMessage(null);
     setFormData({
       name: user?.displayName || '',
       phone: user?.phone?.replace(/\D/g, '').slice(-10) || '',
       pincode: '',
       locality: '',
       address: '',
-      city: 'Bengaluru',
-      state: 'Karnataka',
+      city: '',
+      state: '',
       landmark: '',
       type: 'HOME'
     });
@@ -186,14 +212,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   <MapPin className="w-4 h-4 text-[#0b8442]" />
                   <span>Add Delivery Address</span>
                 </h4>
-                <button
-                  type="button"
-                  onClick={handleFillDemoAddress}
-                  className="bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold px-2.5 py-1 rounded text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-700" />
-                  <span>Autofill Sample Address</span>
-                </button>
+                <span className="text-[11px] text-slate-500 font-medium">Enter details below</span>
               </div>
 
               {formError && (
@@ -208,7 +227,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Sahina Shahid"
+                    placeholder="Enter full name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
@@ -224,7 +243,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                       type="tel"
                       required
                       maxLength={10}
-                      placeholder="9876543210"
+                      placeholder="10-digit mobile"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '') })}
                       className="w-full p-2.5 border border-slate-300 rounded-r bg-white text-slate-900 focus:border-[#0b8442] outline-none"
@@ -235,23 +254,37 @@ export const AddressModal: React.FC<AddressModalProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">6-Digit Pincode *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-700 font-bold">6-Digit Pincode *</label>
+                    {isLookingUpPincode && (
+                      <span className="text-[10px] text-[#0b8442] font-semibold flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Fetching City & State...
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
                     maxLength={6}
-                    placeholder="e.g. 560001"
+                    placeholder="e.g. 560001 or 110001"
                     value={formData.pincode}
                     onChange={(e) => setFormData({ ...formData, pincode: e.target.value.replace(/\D/g, '') })}
                     className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                   />
+                  {pincodeMessage && (
+                    <p className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      {pincodeMessage}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Locality / Colony / Area *</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. MG Road, Ashok Nagar"
+                    placeholder="e.g. Colony, Area or Street"
                     value={formData.locality}
                     onChange={(e) => setFormData({ ...formData, locality: e.target.value })}
                     className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
@@ -264,7 +297,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                 <textarea
                   required
                   rows={2}
-                  placeholder="e.g. #42, Prestige Meridian Towers, 5th Floor"
+                  placeholder="e.g. Flat 302, Green Valley Apartments"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
@@ -277,7 +310,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Bengaluru"
+                    placeholder="City or District"
                     value={formData.city}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                     className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
@@ -290,6 +323,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                     onChange={(e) => setFormData({ ...formData, state: e.target.value })}
                     className="w-full p-2.5 border border-slate-300 rounded bg-white text-slate-900 focus:border-[#0b8442] outline-none"
                   >
+                    <option value="">-- Select State --</option>
                     {INDIAN_STATES.map((st) => (
                       <option key={st} value={st}>{st}</option>
                     ))}
