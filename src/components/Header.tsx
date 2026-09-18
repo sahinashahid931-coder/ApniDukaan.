@@ -58,16 +58,21 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { user, isAdmin, isCustomer, logout, demoLogin } = useAuth();
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [isMobileSearchFocused, setIsMobileSearchFocused] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const mobileSearchContainerRef = useRef<HTMLDivElement>(null);
 
   // Close search suggestions on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
         setIsSearchFocused(false);
+      }
+      if (mobileSearchContainerRef.current && !mobileSearchContainerRef.current.contains(event.target as Node)) {
+        setIsMobileSearchFocused(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -83,20 +88,68 @@ export const Header: React.FC<HeaderProps> = ({
       onSearchChange(randomQuery);
       setIsListening(false);
       setIsSearchFocused(false);
+      setIsMobileSearchFocused(false);
     }, 1800);
   };
 
+  const renderSuggestions = (closeDropdown: () => void) => (
+    <div 
+      id="search-suggestions-dropdown"
+      className="absolute left-0 right-0 top-full mt-1 bg-white text-slate-800 rounded-sm shadow-2xl border border-slate-200 z-50 overflow-hidden"
+    >
+      {isListening ? (
+        <div className="p-6 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 text-red-600 mb-2 animate-bounce">
+            <Mic className="w-6 h-6" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700">Listening to your voice...</p>
+          <p className="text-xs text-slate-500 mt-1">Try saying "iPhone 15" or "Headphones"</p>
+        </div>
+      ) : (
+        <div>
+          <div className="p-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
+            <span className="flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-[#0b8442]" />
+              Trending Searches
+            </span>
+            <span className="text-[11px] text-slate-400 font-normal">Instant Search</span>
+          </div>
+
+          <div className="py-1">
+            {POPULAR_SEARCH_TAGS.map((tag) => (
+              <button
+                key={tag}
+                id={`search-suggestion-${tag.toLowerCase().replace(/\s+/g, '-')}`}
+                onClick={() => {
+                  onSearchChange(tag);
+                  closeDropdown();
+                }}
+                className="w-full text-left px-4 py-2 hover:bg-emerald-50 hover:text-[#0b8442] flex items-center justify-between text-sm transition-colors group cursor-pointer"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#0b8442]" />
+                  <span>{tag}</span>
+                </span>
+                <span className="text-[11px] text-slate-400 group-hover:text-[#0b8442]">in all categories</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <header className="sticky top-0 z-40 bg-[#0b8442] shadow-md text-white">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
-        <div className="flex items-center justify-between h-16 gap-2 sm:gap-6">
+    <header className="sticky top-0 z-40 bg-[#0b8442] shadow-md text-white w-full max-w-full">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-4 lg:px-6">
+        <div className="flex items-center justify-between h-14 sm:h-16 gap-2 sm:gap-4 lg:gap-6 min-w-0">
           
           {/* Mobile Menu & Logo */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <button 
               id="mobile-menu-btn"
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="lg:hidden p-1.5 hover:bg-emerald-700 rounded-md transition-colors"
+              className="lg:hidden p-1.5 hover:bg-emerald-700 rounded-md transition-colors cursor-pointer"
               aria-label="Open menu"
             >
               <Menu className="w-5 h-5" />
@@ -105,27 +158,27 @@ export const Header: React.FC<HeaderProps> = ({
             {/* ApniDukaan Brand */}
             <div 
               onClick={onResetToHome}
-              className="cursor-pointer flex flex-col items-start select-none group"
+              className="cursor-pointer flex flex-col items-start select-none group shrink-0"
               id="brand-logo-btn"
             >
               <div className="flex items-center gap-1">
-                <span className="text-xl sm:text-2xl font-black tracking-tight italic text-white drop-shadow-sm">
+                <span className="text-lg sm:text-2xl font-black tracking-tight italic text-white drop-shadow-sm whitespace-nowrap">
                   Apni<span className="text-[#ffe500]">Dukaan</span>
                 </span>
-                <span className="w-2 h-2 rounded-full bg-[#ffe500] inline-block animate-pulse"></span>
+                <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#ffe500] inline-block animate-pulse"></span>
               </div>
-              <div className="flex items-center text-[11px] font-semibold italic text-emerald-100 -mt-1 group-hover:text-white transition-colors">
+              <div className="flex items-center text-[10px] sm:text-[11px] font-semibold italic text-emerald-100 -mt-1 group-hover:text-white transition-colors">
                 <span>Apni</span>
                 <span className="text-[#ffe500] font-bold mx-0.5">Plus</span>
-                <Sparkles className="w-3 h-3 text-[#ffe500] fill-[#ffe500]" />
+                <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#ffe500] fill-[#ffe500]" />
               </div>
             </div>
           </div>
 
-          {/* Search Box with Live Dropdown */}
+          {/* Desktop Search Box (Visible on md and above) */}
           <div 
             ref={searchContainerRef} 
-            className="flex-1 max-w-2xl relative mx-1 sm:mx-2"
+            className="hidden md:block flex-1 max-w-2xl relative mx-2 lg:mx-4 min-w-0"
           >
             <div className="relative flex items-center">
               <input
@@ -143,7 +196,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     id="clear-search-btn"
                     onClick={() => onSearchChange('')}
-                    className="p-1 hover:text-slate-800 transition-colors"
+                    className="p-1 hover:text-slate-800 transition-colors cursor-pointer"
                     title="Clear search"
                   >
                     <X className="w-4 h-4" />
@@ -153,7 +206,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="voice-search-btn"
                   onClick={handleVoiceSearch}
-                  className={`p-1.5 rounded-full transition-all ${
+                  className={`p-1.5 rounded-full transition-all cursor-pointer ${
                     isListening ? 'bg-red-100 text-red-600 animate-pulse' : 'hover:text-[#0b8442]'
                   }`}
                   title="Search by voice"
@@ -164,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="submit-search-btn"
                   onClick={() => setIsSearchFocused(false)}
-                  className="p-1.5 hover:text-[#0b8442] transition-colors"
+                  className="p-1.5 hover:text-[#0b8442] transition-colors cursor-pointer"
                   aria-label="Search"
                 >
                   <Search className="w-4 h-4 text-[#0b8442]" />
@@ -173,56 +226,11 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Live Search Suggestions Dropdown */}
-            {isSearchFocused && (
-              <div 
-                id="search-suggestions-dropdown"
-                className="absolute left-0 right-0 top-full mt-1 bg-white text-slate-800 rounded-sm shadow-2xl border border-slate-200 z-50 overflow-hidden"
-              >
-                {isListening ? (
-                  <div className="p-6 text-center">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 text-red-600 mb-2 animate-bounce">
-                      <Mic className="w-6 h-6" />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-700">Listening to your voice...</p>
-                    <p className="text-xs text-slate-500 mt-1">Try saying "iPhone 15" or "Headphones"</p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="p-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
-                      <span className="flex items-center gap-1.5">
-                        <TrendingUp className="w-3.5 h-3.5 text-[#0b8442]" />
-                        Trending Searches
-                      </span>
-                      <span className="text-[11px] text-slate-400 font-normal">Instant Search</span>
-                    </div>
-
-                    <div className="py-1">
-                      {POPULAR_SEARCH_TAGS.map((tag) => (
-                        <button
-                          key={tag}
-                          id={`search-suggestion-${tag.toLowerCase().replace(/\s+/g, '-')}`}
-                          onClick={() => {
-                            onSearchChange(tag);
-                            setIsSearchFocused(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-emerald-50 hover:text-[#0b8442] flex items-center justify-between text-sm transition-colors group"
-                        >
-                          <span className="flex items-center gap-2.5">
-                            <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#0b8442]" />
-                            <span>{tag}</span>
-                          </span>
-                          <span className="text-[11px] text-slate-400 group-hover:text-[#0b8442]">in all categories</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            {isSearchFocused && renderSuggestions(() => setIsSearchFocused(false))}
           </div>
 
           {/* Right Navigation Actions */}
-          <div className="flex items-center gap-2 sm:gap-3 lg:gap-5 text-sm font-medium">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 lg:gap-4 text-sm font-medium shrink-0">
             
             {/* SuperCoins Badge (Customer) */}
             <div 
@@ -241,12 +249,13 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="header-admin-portal-btn"
                   onClick={onOpenAdminDashboard}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ffe500] hover:bg-yellow-300 text-[#0b8442] font-black rounded text-xs shadow-sm transition-all transform hover:scale-105 cursor-pointer"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#ffe500] hover:bg-yellow-300 text-[#0b8442] font-black rounded text-xs shadow-sm transition-transform active:scale-95 cursor-pointer shrink-0"
                   title="Manage entire store inventory, catalog & orders"
                 >
-                  <Shield className="w-4 h-4 text-[#0b8442]" />
-                  <span>Admin Portal</span>
-                  <span className="bg-[#0b8442] text-white text-[10px] px-1.5 py-0.2 rounded font-bold ml-0.5">
+                  <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0b8442] shrink-0" />
+                  <span className="hidden xs:inline sm:inline">Admin</span>
+                  <span className="hidden md:inline">Portal</span>
+                  <span className="bg-[#0b8442] text-white text-[9px] sm:text-[10px] px-1 py-0.2 rounded font-bold hidden sm:inline">
                     Owner
                   </span>
                 </button>
@@ -256,7 +265,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-admin-portal-link"
                 onClick={() => onOpenAuth('admin')}
-                className="hidden xl:flex items-center gap-1.5 hover:text-yellow-200 cursor-pointer transition-colors text-xs font-bold"
+                className="hidden xl:flex items-center gap-1.5 hover:text-yellow-200 cursor-pointer transition-colors text-xs font-bold shrink-0"
                 title="Store Owner Portal"
               >
                 <Shield className="w-4 h-4 text-[#ffe500]" />
@@ -266,24 +275,24 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Account / User Menu or Login Button */}
             {user ? (
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button
                   id="user-menu-btn"
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white text-[#0b8442] font-semibold rounded-sm hover:bg-slate-100 transition-colors shadow-sm cursor-pointer"
+                  className="flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 bg-white text-[#0b8442] font-semibold rounded-sm hover:bg-slate-100 transition-colors shadow-sm cursor-pointer text-xs"
                 >
-                  <User className="w-4 h-4 text-[#0b8442]" />
-                  <span className="hidden sm:inline max-w-[110px] truncate">
+                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0b8442] shrink-0" />
+                  <span className="hidden sm:inline max-w-[80px] md:max-w-[110px] truncate">
                     {user.displayName?.split(' ')[0] || 'Account'}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                  <ChevronDown className="w-3 h-3 transition-transform" />
                 </button>
 
                 {showUserMenu && (
                   <div 
                     id="user-dropdown-menu"
                     onMouseLeave={() => setShowUserMenu(false)}
-                    className="absolute right-0 top-full mt-2 w-64 bg-white text-slate-800 rounded shadow-xl border border-slate-200 z-50 py-1 divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-150"
+                    className="absolute right-0 top-full mt-2 w-60 sm:w-64 bg-white text-slate-800 rounded shadow-xl border border-slate-200 z-50 py-1 divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-150"
                   >
                     <div className="px-4 py-3 bg-slate-50">
                       <div className="flex items-center justify-between">
@@ -389,10 +398,10 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-login-btn"
                 onClick={() => onOpenAuth('customer')}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-white text-[#0b8442] font-bold rounded-sm hover:bg-slate-100 transition-colors shadow-sm cursor-pointer text-xs"
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 bg-white text-[#0b8442] font-bold rounded-sm hover:bg-slate-100 transition-colors shadow-sm cursor-pointer text-xs shrink-0"
               >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>Mobile Login</span>
+                <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                <span>Login</span>
               </button>
             )}
 
@@ -400,16 +409,16 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-wishlist-btn"
               onClick={onOpenWishlist}
-              className="relative p-1.5 hover:text-yellow-200 transition-colors flex items-center gap-1 cursor-pointer"
+              className="relative p-1 sm:p-1.5 hover:text-yellow-200 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
               title="Wishlist"
               aria-label="Wishlist"
             >
               <Heart className="w-5 h-5" />
-              <span className="hidden lg:inline text-sm">Wishlist</span>
+              <span className="hidden xl:inline text-sm">Wishlist</span>
               {wishlistCount > 0 && (
                 <span 
                   id="wishlist-badge-count"
-                  className="absolute -top-1 -right-1.5 bg-[#ff6161] text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border border-[#0b8442]"
+                  className="absolute -top-1 -right-1 bg-[#ff6161] text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border border-[#0b8442]"
                 >
                   {wishlistCount}
                 </span>
@@ -420,16 +429,16 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-cart-btn"
               onClick={onOpenCart}
-              className="relative flex items-center gap-1.5 px-3 py-1.5 hover:bg-emerald-700 rounded-sm transition-colors cursor-pointer"
+              className="relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 hover:bg-emerald-700 rounded-sm transition-colors cursor-pointer shrink-0"
               title="Shopping Cart"
               aria-label="Shopping Cart"
             >
-              <ShoppingCart className="w-5 h-5" />
-              <span className="hidden sm:inline font-semibold">Cart</span>
+              <ShoppingCart className="w-5 h-5 shrink-0" />
+              <span className="hidden sm:inline font-semibold text-xs sm:text-sm">Cart</span>
               {cartCount > 0 && (
                 <span 
                   id="cart-badge-count"
-                  className="bg-[#ffe500] text-[#0b8442] font-black text-xs min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center shadow-sm"
+                  className="bg-[#ffe500] text-[#0b8442] font-black text-xs min-w-[18px] sm:min-w-[20px] h-4.5 sm:h-5 px-1 sm:px-1.5 rounded-full flex items-center justify-center shadow-sm"
                 >
                   {cartCount}
                 </span>
@@ -437,6 +446,58 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Mobile Search Bar Row (Dedicated full-width row on < md) */}
+        <div 
+          ref={mobileSearchContainerRef}
+          className="md:hidden pb-2.5 pt-0.5 px-0.5 relative"
+        >
+          <div className="relative flex items-center">
+            <input
+              id="mobile-product-search-input"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onFocus={() => setIsMobileSearchFocused(true)}
+              placeholder="Search products, brands & categories..."
+              className="w-full bg-white text-slate-900 placeholder:text-slate-400 pl-3.5 pr-20 py-2 rounded text-xs focus:outline-none focus:ring-2 focus:ring-yellow-400 shadow-sm"
+            />
+
+            <div className="absolute right-1.5 flex items-center gap-1 text-slate-500">
+              {searchQuery && (
+                <button
+                  onClick={() => onSearchChange('')}
+                  className="p-1 hover:text-slate-800 transition-colors cursor-pointer"
+                  title="Clear"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <button
+                onClick={handleVoiceSearch}
+                className={`p-1 rounded-full transition-all cursor-pointer ${
+                  isListening ? 'bg-red-100 text-red-600 animate-pulse' : 'hover:text-[#0b8442]'
+                }`}
+                title="Voice search"
+              >
+                {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+              </button>
+
+              <button
+                onClick={() => setIsMobileSearchFocused(false)}
+                className="p-1 hover:text-[#0b8442] transition-colors cursor-pointer"
+                aria-label="Search"
+              >
+                <Search className="w-3.5 h-3.5 text-[#0b8442]" />
+              </button>
+            </div>
+          </div>
+
+          {/* Live Search Suggestions Dropdown (Mobile) */}
+          {isMobileSearchFocused && renderSuggestions(() => setIsMobileSearchFocused(false))}
+        </div>
+
       </div>
 
       {/* Mobile Drawer Navigation */}

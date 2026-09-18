@@ -424,7 +424,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f1f2f4]">
+    <div className="min-h-screen flex flex-col bg-[#f1f2f4] w-full max-w-full overflow-x-hidden">
       {/* 1. ApniDukaan Header */}
       <Header
         searchQuery={filters.searchQuery}
@@ -514,27 +514,27 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-2 sm:px-4 mt-4 sm:mt-6">
           
           {/* Results Meta & Sort Controls */}
-          <div className="bg-white p-3 sm:p-4 rounded-md border border-slate-200 shadow-xs mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2">
+          <div className="bg-white p-3 sm:p-4 rounded-md border border-slate-200 shadow-xs mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2 flex-wrap">
                 {filters.searchQuery ? (
-                  <span>Showing results for <span className="text-[#0b8442]">"{filters.searchQuery}"</span></span>
+                  <span className="truncate">Showing results for <span className="text-[#0b8442]">"{filters.searchQuery}"</span></span>
                 ) : filters.category !== 'all' ? (
-                  <span className="capitalize">{filters.subcategory || filters.category} Store</span>
+                  <span className="capitalize truncate">{filters.subcategory || filters.category} Store</span>
                 ) : (
                   <span>All Recommended Products</span>
                 )}
-                <span className="text-xs text-slate-400 font-normal">
+                <span className="text-xs text-slate-400 font-normal shrink-0">
                   ({filteredProducts.length} items found)
                 </span>
               </h2>
             </div>
 
             {/* Sort Bar & View Switcher */}
-            <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap text-xs">
+            <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap text-xs min-w-0">
               
               {/* Sort Tabs */}
-              <div className="flex items-center gap-1 overflow-x-auto text-slate-600">
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar text-slate-600 max-w-full pb-0.5 sm:pb-0">
                 <span className="font-bold text-slate-400 mr-1 hidden sm:inline">Sort By:</span>
                 
                 <button
